@@ -48,6 +48,66 @@ const DNS_LOOKUP_TIMEOUT_MS = 5_000;
 /** Only these protocols are allowed for plugin HTTP requests. */
 const ALLOWED_PROTOCOLS = new Set(["http:", "https:"]);
 
+// ---------------------------------------------------------------------------
+// Private-IP allowlist (env: PAPERCLIP_PLUGIN_ALLOWED_PRIVATE_HOSTS)
+// ---------------------------------------------------------------------------
+// Comma-separated list of IPs or CIDRs that plugins are permitted to reach
+// even though they fall in private/reserved ranges.  Example:
+//   PAPERCLIP_PLUGIN_ALLOWED_PRIVATE_HOSTS=172.16.1.222,172.16.1.0/24
+// ---------------------------------------------------------------------------
+
+interface CidrEntry { ip: number; mask: number }
+
+function parseIPv4(ip: string): number | null {
+  const parts = ip.split(".");
+  if (parts.length !== 4) return null;
+  let num = 0;
+  for (const p of parts) {
+    const n = Number(p);
+    if (!Number.isInteger(n) || n < 0 || n > 255) return null;
+    num = (num << 8) | n;
+  }
+  return num >>> 0; // unsigned
+}
+
+function parseAllowlist(raw: string): { ips: Set<string>; cidrs: CidrEntry[] } {
+  const ips = new Set<string>();
+  const cidrs: CidrEntry[] = [];
+  for (const entry of raw.split(",")) {
+    const trimmed = entry.trim();
+    if (!trimmed) continue;
+    if (trimmed.includes("/")) {
+      const [addr, bits] = trimmed.split("/");
+      const ip = parseIPv4(addr!);
+      const prefix = Number(bits);
+      if (ip !== null && Number.isInteger(prefix) && prefix >= 0 && prefix <= 32) {
+        const mask = prefix === 0 ? 0 : (~0 << (32 - prefix)) >>> 0;
+        cidrs.push({ ip: (ip & mask) >>> 0, mask });
+      }
+    } else {
+      ips.add(trimmed);
+    }
+  }
+  return { ips, cidrs };
+}
+
+const _allowlistRaw = process.env.PAPERCLIP_PLUGIN_ALLOWED_PRIVATE_HOSTS ?? "";
+const _privateIpAllowlist = parseAllowlist(_allowlistRaw);
+
+function isAllowlistedPrivateIP(ip: string): boolean {
+  // Direct match (works for both IPv4 and IPv6 literals)
+  if (_privateIpAllowlist.ips.has(ip)) return true;
+
+  // CIDR match (IPv4 only)
+  const num = parseIPv4(ip);
+  if (num !== null) {
+    for (const cidr of _privateIpAllowlist.cidrs) {
+      if (((num & cidr.mask) >>> 0) === cidr.ip) return true;
+    }
+  }
+  return false;
+}
+
 /**
  * Check if an IP address is in a private/reserved range (RFC 1918, loopback,
  * link-local, etc.) that plugins should never be able to reach.
@@ -142,10 +202,12 @@ async function validateAndResolveFetchUrl(urlString: string): Promise<ValidatedF
       throw new Error(`DNS resolution returned no results for ${originalHostname}`);
     }
 
-    // Filter to only non-private IPs instead of rejecting the entire request
-    // when some IPs are private. This handles multi-homed hosts that resolve
-    // to both private and public addresses.
-    const safeResults = results.filter((entry) => !isPrivateIP(entry.address));
+    // Filter to IPs that are either non-private or explicitly allowlisted.
+    // This handles multi-homed hosts that resolve to both private and public
+    // addresses, while still permitting board-approved private hosts.
+    const safeResults = results.filter(
+      (entry) => !isPrivateIP(entry.address) || isAllowlistedPrivateIP(entry.address),
+    );
     if (safeResults.length === 0) {
       throw new Error(
         `All resolved IPs for ${originalHostname} are in private/reserved ranges`,
