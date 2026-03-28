@@ -91,17 +91,26 @@ function parseAllowlist(raw: string): { ips: Set<string>; cidrs: CidrEntry[] } {
   return { ips, cidrs };
 }
 
-const _allowlistRaw = process.env.PAPERCLIP_PLUGIN_ALLOWED_PRIVATE_HOSTS ?? "";
-const _privateIpAllowlist = parseAllowlist(_allowlistRaw);
+// Lazily parsed on first use so dotenv has time to load the env var.
+let _privateIpAllowlist: ReturnType<typeof parseAllowlist> | null = null;
+
+function getPrivateIpAllowlist(): ReturnType<typeof parseAllowlist> {
+  if (!_privateIpAllowlist) {
+    const raw = process.env.PAPERCLIP_PLUGIN_ALLOWED_PRIVATE_HOSTS ?? "";
+    _privateIpAllowlist = parseAllowlist(raw);
+  }
+  return _privateIpAllowlist;
+}
 
 function isAllowlistedPrivateIP(ip: string): boolean {
+  const allowlist = getPrivateIpAllowlist();
   // Direct match (works for both IPv4 and IPv6 literals)
-  if (_privateIpAllowlist.ips.has(ip)) return true;
+  if (allowlist.ips.has(ip)) return true;
 
   // CIDR match (IPv4 only)
   const num = parseIPv4(ip);
   if (num !== null) {
-    for (const cidr of _privateIpAllowlist.cidrs) {
+    for (const cidr of allowlist.cidrs) {
       if (((num & cidr.mask) >>> 0) === cidr.ip) return true;
     }
   }
