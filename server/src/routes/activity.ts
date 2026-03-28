@@ -44,8 +44,13 @@ export function activityRoutes(db: Db) {
   });
 
   router.post("/companies/:companyId/activity", validate(createActivitySchema), async (req, res) => {
-    assertBoard(req);
     const companyId = req.params.companyId as string;
+    assertCompanyAccess(req, companyId);
+    // Agents can only log activity as themselves
+    if (req.actor.type === "agent" && req.body.actorId && req.body.actorId !== req.actor.agentId) {
+      res.status(403).json({ error: "Agent can only report its own activity" });
+      return;
+    }
     const event = await svc.create({
       companyId,
       ...req.body,
