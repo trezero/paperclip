@@ -57,6 +57,22 @@ interface Campaign {
   endDate: string | null;
 }
 
+interface EngagementMetrics {
+  likes: number;
+  comments: number;
+  shares: number;
+  impressions: number;
+  platform: string;
+  fetchedAt: string;
+}
+
+interface EngagementSummaryItem {
+  cardId: string;
+  topic: string;
+  platform: string;
+  latest: EngagementMetrics | null;
+}
+
 interface BrandSettings {
   tone: string;
   audience: string;
@@ -290,6 +306,8 @@ function PipelineView({
   const execute = usePluginAction("execute-tool");
   const toast = usePluginToast();
   const hostCtx = useHostContext();
+  const [bulkMode, setBulkMode] = useState(false);
+  const [bulkSelected, setBulkSelected] = useState<Set<string>>(new Set());
 
   const columnCards = useMemo(() => {
     const groups: Record<CardStatus, ContentCard[]> = {
@@ -303,6 +321,35 @@ function PipelineView({
     }
     return groups;
   }, [cards]);
+
+  const toggleBulkCard = useCallback((id: string) => {
+    setBulkSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }, []);
+
+  const handleBulkStatusChange = useCallback(async (targetStatus: CardStatus) => {
+    if (bulkSelected.size === 0) return;
+    const count = bulkSelected.size;
+    toast({ title: `Moving ${count} post${count > 1 ? "s" : ""} to ${targetStatus}...`, tone: "info" });
+    try {
+      for (const cardId of bulkSelected) {
+        await execute({
+          toolName: "update-card-status",
+          parameters: { cardId, status: targetStatus },
+          runContext: { companyId: hostCtx.companyId },
+        });
+      }
+      toast({ title: `${count} post${count > 1 ? "s" : ""} moved to ${targetStatus}`, tone: "success" });
+      setBulkSelected(new Set());
+      onRefresh();
+    } catch (err: any) {
+      toast({ title: `Bulk update failed: ${err.message}`, tone: "error" });
+    }
+  }, [bulkSelected, execute, hostCtx.companyId, toast, onRefresh]);
 
   const handleAutoGenerate = useCallback(async () => {
     toast({ title: "Generating post...", tone: "info" });
@@ -323,7 +370,13 @@ function PipelineView({
     <div>
       <div style={styles.header}>
         <h2 style={styles.h2}>Pipeline</h2>
-        <div style={{ display: "flex", gap: 8 }}>
+        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+          <button
+            style={styles.btn(bulkMode ? "primary" : "ghost")}
+            onClick={() => { setBulkMode((v) => !v); setBulkSelected(new Set()); }}
+          >
+            {bulkMode ? "Exit Bulk" : "Bulk Select"}
+          </button>
           <button style={styles.btn("secondary")} onClick={onRefresh}>
             Refresh
           </button>
@@ -332,6 +385,23 @@ function PipelineView({
           </button>
         </div>
       </div>
+
+      {/* Bulk action bar */}
+      {bulkMode && bulkSelected.size > 0 && (
+        <div style={{ display: "flex", gap: 8, alignItems: "center", padding: "8px 12px", background: "#1a1a24", borderRadius: 8, marginBottom: 12 }}>
+          <span style={{ fontSize: 13, color: "#ccc" }}>{bulkSelected.size} selected</span>
+          <button style={styles.btn("secondary")} onClick={() => handleBulkStatusChange("review")}>
+            Move to Review
+          </button>
+          <button style={styles.btn("secondary")} onClick={() => handleBulkStatusChange("approved")}>
+            Approve All
+          </button>
+          <button style={styles.btn("ghost")} onClick={() => setBulkSelected(new Set())}>
+            Clear
+          </button>
+        </div>
+      )}
+
       <div style={styles.kanban}>
         {STATUS_COLUMNS.map((status) => (
           <div key={status} style={styles.column}>
@@ -347,9 +417,20 @@ function PipelineView({
             {columnCards[status].map((card) => (
               <div
                 key={card.id}
-                style={styles.card(card.id === selectedCardId)}
-                onClick={() => onSelectCard(card.id === selectedCardId ? null : card.id)}
+                style={{
+                  ...styles.card(bulkMode ? bulkSelected.has(card.id) : card.id === selectedCardId),
+                  position: "relative" as const,
+                }}
+                onClick={() => bulkMode ? toggleBulkCard(card.id) : onSelectCard(card.id === selectedCardId ? null : card.id)}
               >
+                {bulkMode && (
+                  <input
+                    type="checkbox"
+                    checked={bulkSelected.has(card.id)}
+                    readOnly
+                    style={{ position: "absolute" as const, top: 8, right: 8, accentColor: "#7c6ef0" }}
+                  />
+                )}
                 <div style={styles.cardTitle}>{card.topic}</div>
                 <div style={styles.cardMeta}>
                   <span style={styles.pill(PLATFORM_COLORS[card.platform] ?? "#888")}>
@@ -517,6 +598,15 @@ function DetailPanel({
 // Create Workshop
 // ---------------------------------------------------------------------------
 
+const TEMPLATES: { name: string; topic: string; tone: string; platform: Platform }[] = [
+  { name: "Product Launch", topic: "New feature launch announcement", tone: "hype", platform: "twitter" },
+  { name: "Community Update", topic: "Weekly community progress update", tone: "friendly", platform: "reddit" },
+  { name: "Alpha Leak", topic: "Upcoming partnership or integration hint", tone: "mysterious", platform: "twitter" },
+  { name: "Educational", topic: "How our technology works explained simply", tone: "professional", platform: "reddit" },
+  { name: "Meme Drop", topic: "Fun community meme about the project", tone: "witty", platform: "twitter" },
+  { name: "AMA Promo", topic: "Upcoming AMA session announcement", tone: "exciting", platform: "telegram" },
+];
+
 function CreateView({ onRefresh }: { onRefresh: () => void }) {
   const execute = usePluginAction("execute-tool");
   const toast = usePluginToast();
@@ -524,8 +614,19 @@ function CreateView({ onRefresh }: { onRefresh: () => void }) {
   const [topic, setTopic] = useState("");
   const [platform, setPlatform] = useState<Platform>("twitter");
   const [tone, setTone] = useState("");
+  const [abTest, setAbTest] = useState(false);
+  const [variantCount, setVariantCount] = useState(3);
   const [result, setResult] = useState<string | null>(null);
   const [running, setRunning] = useState(false);
+  const [showTemplates, setShowTemplates] = useState(false);
+
+  const applyTemplate = useCallback((t: typeof TEMPLATES[number]) => {
+    setTopic(t.topic);
+    setTone(t.tone);
+    setPlatform(t.platform);
+    setShowTemplates(false);
+    toast({ title: `Applied "${t.name}" template`, tone: "info" });
+  }, [toast]);
 
   const handleGenerate = useCallback(async () => {
     if (!topic.trim()) {
@@ -535,17 +636,45 @@ function CreateView({ onRefresh }: { onRefresh: () => void }) {
     setRunning(true);
     setResult(null);
     try {
-      const res = await execute({
-        toolName: "generate-post",
-        parameters: {
-          topic,
-          platform,
-          tone: tone || undefined,
-        },
-        runContext: { companyId: hostCtx.companyId },
-      });
-      setResult(JSON.stringify(res, null, 2));
-      toast({ title: "Post created in drafts!", tone: "success" });
+      if (abTest) {
+        // Generate multiple variants for A/B testing
+        const tones = tone
+          ? [tone, `${tone} but edgier`, `${tone} but casual`]
+          : ["professional", "witty", "hype"];
+        const count = Math.min(variantCount, tones.length);
+        const groupId = `ab-${Date.now()}`;
+        const results: string[] = [];
+
+        for (let i = 0; i < count; i++) {
+          const res = await execute({
+            toolName: "generate-post",
+            parameters: {
+              topic,
+              platform,
+              tone: tones[i],
+              variantGroupId: groupId,
+              variantLabel: String.fromCharCode(65 + i), // A, B, C
+            },
+            runContext: { companyId: hostCtx.companyId },
+          });
+          results.push(`Variant ${String.fromCharCode(65 + i)} (${tones[i]}):\n${JSON.stringify(res, null, 2)}`);
+        }
+
+        setResult(results.join("\n\n---\n\n"));
+        toast({ title: `${count} A/B variants created in drafts!`, tone: "success" });
+      } else {
+        const res = await execute({
+          toolName: "generate-post",
+          parameters: {
+            topic,
+            platform,
+            tone: tone || undefined,
+          },
+          runContext: { companyId: hostCtx.companyId },
+        });
+        setResult(JSON.stringify(res, null, 2));
+        toast({ title: "Post created in drafts!", tone: "success" });
+      }
       onRefresh();
     } catch (err: any) {
       toast({ title: err.message, tone: "error" });
@@ -553,13 +682,41 @@ function CreateView({ onRefresh }: { onRefresh: () => void }) {
     } finally {
       setRunning(false);
     }
-  }, [topic, platform, tone, execute, hostCtx.companyId, toast, onRefresh]);
+  }, [topic, platform, tone, abTest, variantCount, execute, hostCtx.companyId, toast, onRefresh]);
 
   return (
     <div>
       <div style={styles.header}>
         <h2 style={styles.h2}>Create Workshop</h2>
+        <button style={styles.btn("ghost")} onClick={() => setShowTemplates((v) => !v)}>
+          {showTemplates ? "Hide Templates" : "Templates"}
+        </button>
       </div>
+
+      {/* Templates panel */}
+      {showTemplates && (
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 10, marginBottom: 20 }}>
+          {TEMPLATES.map((t) => (
+            <button
+              key={t.name}
+              onClick={() => applyTemplate(t)}
+              style={{
+                background: "#1a1a24",
+                border: "1px solid #2a2a35",
+                borderRadius: 8,
+                padding: 12,
+                cursor: "pointer",
+                textAlign: "left" as const,
+                color: "#e0e0e0",
+              }}
+            >
+              <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 4 }}>{t.name}</div>
+              <div style={{ fontSize: 11, color: "#888" }}>{t.platform} &middot; {t.tone}</div>
+            </button>
+          ))}
+        </div>
+      )}
+
       <div style={{ maxWidth: 600 }}>
         <div style={styles.section}>
           <label style={styles.label}>Topic</label>
@@ -593,12 +750,41 @@ function CreateView({ onRefresh }: { onRefresh: () => void }) {
             />
           </div>
         </div>
+
+        {/* A/B Testing toggle */}
+        <div style={{ ...styles.section, display: "flex", alignItems: "center", gap: 12 }}>
+          <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", fontSize: 13, color: "#ccc" }}>
+            <input
+              type="checkbox"
+              checked={abTest}
+              onChange={(e) => setAbTest(e.target.checked)}
+              style={{ accentColor: "#7c6ef0" }}
+            />
+            A/B Test Mode
+          </label>
+          {abTest && (
+            <select
+              style={{ ...styles.select, width: "auto" }}
+              value={variantCount}
+              onChange={(e) => setVariantCount(Number(e.target.value))}
+            >
+              <option value={2}>2 variants</option>
+              <option value={3}>3 variants</option>
+            </select>
+          )}
+          {abTest && (
+            <span style={{ fontSize: 11, color: "#888" }}>
+              Generates multiple tone variants in a shared group for comparison
+            </span>
+          )}
+        </div>
+
         <button
           style={{ ...styles.btn("primary"), width: "100%", padding: 12 }}
           onClick={handleGenerate}
           disabled={running}
         >
-          {running ? "Generating..." : "Generate Post"}
+          {running ? "Generating..." : abTest ? `Generate ${variantCount} Variants` : "Generate Post"}
         </button>
         {result && (
           <pre
@@ -728,40 +914,110 @@ function DiscoverView({ onRefresh }: { onRefresh: () => void }) {
 // Monitor View (Engagement)
 // ---------------------------------------------------------------------------
 
-function MonitorView() {
-  const { data: cards } = usePluginData<ContentCard[]>("pipeline");
-  const published = useMemo(
-    () => (cards ?? []).filter((c) => c.status === "published"),
-    [cards],
+function MetricBar({ value, max, color }: { value: number; max: number; color: string }) {
+  const pct = max > 0 ? Math.min(100, (value / max) * 100) : 0;
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+      <div style={{ width: 80, height: 6, background: "#2a2a35", borderRadius: 3, overflow: "hidden" }}>
+        <div style={{ width: `${pct}%`, height: "100%", background: color, borderRadius: 3 }} />
+      </div>
+      <span style={{ fontSize: 11, color: "#ccc", minWidth: 32 }}>{value.toLocaleString()}</span>
+    </div>
   );
+}
+
+function EngagementCard({ item, maxMetrics }: { item: EngagementSummaryItem; maxMetrics: { likes: number; comments: number; shares: number; impressions: number } }) {
+  const m = item.latest;
+  return (
+    <div style={{ ...styles.trendCard, flexDirection: "column" as const, alignItems: "stretch", gap: 10 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+        <div>
+          <div style={{ fontSize: 14, fontWeight: 500 }}>{item.topic}</div>
+          <div style={{ fontSize: 12, color: "#888" }}>{item.platform}</div>
+        </div>
+        <span style={styles.pill(m ? "#4caf50" : "#666")}>{m ? "Tracked" : "Pending"}</span>
+      </div>
+      {m ? (
+        <div style={{ display: "grid", gridTemplateColumns: "80px 1fr", gap: "4px 8px", fontSize: 12, color: "#aaa" }}>
+          <span>Likes</span>
+          <MetricBar value={m.likes} max={maxMetrics.likes} color="#e91e63" />
+          <span>Comments</span>
+          <MetricBar value={m.comments} max={maxMetrics.comments} color="#2196f3" />
+          <span>Shares</span>
+          <MetricBar value={m.shares} max={maxMetrics.shares} color="#ff9800" />
+          <span>Impressions</span>
+          <MetricBar value={m.impressions} max={maxMetrics.impressions} color="#7c6ef0" />
+          <span style={{ gridColumn: "1 / -1", fontSize: 11, color: "#666", marginTop: 4 }}>
+            Last updated: {new Date(m.fetchedAt).toLocaleString()}
+          </span>
+        </div>
+      ) : (
+        <div style={{ fontSize: 12, color: "#666" }}>Engagement data not yet collected. Run the engagement poll job to fetch metrics.</div>
+      )}
+    </div>
+  );
+}
+
+function MonitorView() {
+  const { data: summary } = usePluginData<EngagementSummaryItem[]>("engagement-summary");
+  const items = summary ?? [];
+
+  const maxMetrics = useMemo(() => {
+    const m = { likes: 1, comments: 1, shares: 1, impressions: 1 };
+    for (const item of items) {
+      if (!item.latest) continue;
+      m.likes = Math.max(m.likes, item.latest.likes);
+      m.comments = Math.max(m.comments, item.latest.comments);
+      m.shares = Math.max(m.shares, item.latest.shares);
+      m.impressions = Math.max(m.impressions, item.latest.impressions);
+    }
+    return m;
+  }, [items]);
+
+  const totals = useMemo(() => {
+    const t = { likes: 0, comments: 0, shares: 0, impressions: 0, tracked: 0 };
+    for (const item of items) {
+      if (!item.latest) continue;
+      t.likes += item.latest.likes;
+      t.comments += item.latest.comments;
+      t.shares += item.latest.shares;
+      t.impressions += item.latest.impressions;
+      t.tracked++;
+    }
+    return t;
+  }, [items]);
 
   return (
     <div>
       <div style={styles.header}>
         <h2 style={styles.h2}>Monitor</h2>
       </div>
-      {published.length === 0 ? (
+
+      {/* Aggregate stats strip */}
+      {items.length > 0 && (
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 12, marginBottom: 20 }}>
+          {([
+            { label: "Total Likes", value: totals.likes, color: "#e91e63" },
+            { label: "Total Comments", value: totals.comments, color: "#2196f3" },
+            { label: "Total Shares", value: totals.shares, color: "#ff9800" },
+            { label: "Impressions", value: totals.impressions, color: "#7c6ef0" },
+          ] as const).map((stat) => (
+            <div key={stat.label} style={{ background: "#1a1a24", borderRadius: 8, padding: 14, borderLeft: `3px solid ${stat.color}` }}>
+              <div style={{ fontSize: 11, color: "#888", textTransform: "uppercase" as const, letterSpacing: 0.5 }}>{stat.label}</div>
+              <div style={{ fontSize: 22, fontWeight: 600, color: "#e0e0e0", marginTop: 4 }}>{stat.value.toLocaleString()}</div>
+              <div style={{ fontSize: 11, color: "#666", marginTop: 2 }}>{totals.tracked} post{totals.tracked !== 1 ? "s" : ""} tracked</div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {items.length === 0 ? (
         <div style={styles.emptyState}>
-          No published posts yet. Approve and publish content from the pipeline to start tracking
-          engagement.
+          No published posts yet. Approve and publish content from the pipeline to start tracking engagement.
         </div>
       ) : (
-        published.map((card) => (
-          <div key={card.id} style={styles.trendCard}>
-            <div>
-              <div style={{ fontSize: 14, fontWeight: 500 }}>{card.topic}</div>
-              <div style={{ fontSize: 12, color: "#888" }}>
-                {card.platform} &middot; Published{" "}
-                {new Date(card.updatedAt).toLocaleDateString()}
-              </div>
-              {card.platformPostRef && (
-                <div style={{ fontSize: 11, color: "#666", marginTop: 4 }}>
-                  Ref: {card.platformPostRef}
-                </div>
-              )}
-            </div>
-            <span style={styles.pill("#4caf50")}>Live</span>
-          </div>
+        items.map((item) => (
+          <EngagementCard key={item.cardId} item={item} maxMetrics={maxMetrics} />
         ))
       )}
     </div>

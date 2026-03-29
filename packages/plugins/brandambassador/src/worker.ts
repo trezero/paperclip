@@ -565,6 +565,7 @@ function createCardFromParts(
   mediaType: "image" | "video" | null,
   moderationScore: number | null,
   runCtx: ToolRunContext,
+  opts?: { variantGroupId?: string; variantLabel?: string },
 ): ContentCard {
   return {
     id: uuid(),
@@ -584,8 +585,8 @@ function createCardFromParts(
     platformPostRef: null,
     publishError: null,
     publishAttempts: 0,
-    variantGroupId: null,
-    variantLabel: null,
+    variantGroupId: opts?.variantGroupId ?? null,
+    variantLabel: opts?.variantLabel ?? null,
     createdAt: now(),
     updatedAt: now(),
   };
@@ -634,6 +635,37 @@ const plugin = definePlugin({
 
     ctx.data.register("templates", async (params) => {
       return await getTemplates(ctx, params.companyId as string);
+    });
+
+    ctx.data.register("engagement-summary", async (params) => {
+      const companyId = params.companyId as string;
+      const cards = await getCards(ctx, companyId);
+      const published = cards.filter((c) => c.status === "published" && c.platformPostRef);
+
+      const summary: {
+        cardId: string;
+        topic: string;
+        platform: string;
+        latest: EngagementMetrics | null;
+      }[] = [];
+
+      for (const card of published) {
+        const histRaw = await ctx.state.get({
+          scopeKind: "company",
+          scopeId: companyId,
+          namespace: "engagement",
+          stateKey: `engagement:${card.id}`,
+        });
+        const history = (histRaw as EngagementMetrics[] | null) ?? [];
+        summary.push({
+          cardId: card.id,
+          topic: card.topic,
+          platform: card.platform,
+          latest: history.length > 0 ? history[history.length - 1] : null,
+        });
+      }
+
+      return summary;
     });
 
     // ------------------------------------------------------------------
@@ -746,6 +778,7 @@ const plugin = definePlugin({
           const card = createCardFromParts(
             p.topic as string, captionResult.caption, (p.platform as Platform) ?? "twitter",
             mediaRef, mediaType, mod.score, runCtx,
+            { variantGroupId: p.variantGroupId as string | undefined, variantLabel: p.variantLabel as string | undefined },
           );
           const cards = await getCards(ctx, companyId);
           cards.push(card);
