@@ -379,3 +379,30 @@ export interface PluginStreamResult<T = unknown> {
  * ```
  */
 export type PluginActionFn = (params?: Record<string, unknown>) => Promise<unknown>;
+
+// ---------------------------------------------------------------------------
+// useNavigateToEntity hook types
+// ---------------------------------------------------------------------------
+
+/**
+ * Parameters for navigating to a Paperclip entity from plugin UI.
+ *
+ * The host translates the entity type + ID into the correct host route.
+ * Plugin components never need to know host routing details.
+ *
+ * @see PLUGIN_SPEC.md §19 — UI Extension Model
+ */
+export interface NavigateToEntityParams {
+  /** The entity type to navigate to. */
+  type: "issue" | "agent" | "project" | "company";
+  /** The entity identifier — issue ref (e.g. "MF-147") or UUID. */
+  id: string;
+  /** Company ID for scoping the navigation. */
+  companyId: string;
+}
+
+/**
+ * Function returned by `useNavigateToEntity()`.
+ * Navigates the host app to the given entity's detail page.
+ */
+export type NavigateToEntityFn = (params: NavigateToEntityParams) => void;
