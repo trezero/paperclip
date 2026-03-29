@@ -772,12 +772,81 @@ function MonitorView() {
 // Campaigns View
 // ---------------------------------------------------------------------------
 
+function ScheduleCalendar({ cards }: { cards: ContentCard[] }) {
+  const scheduled = useMemo(
+    () => cards.filter((c) => c.scheduledAt).sort((a, b) => new Date(a.scheduledAt!).getTime() - new Date(b.scheduledAt!).getTime()),
+    [cards],
+  );
+
+  // Build a 7-day calendar starting today
+  const days = useMemo(() => {
+    const result: { date: Date; label: string; cards: ContentCard[] }[] = [];
+    const today = new Date();
+    for (let i = 0; i < 7; i++) {
+      const d = new Date(today);
+      d.setDate(today.getDate() + i);
+      const dayStr = d.toISOString().slice(0, 10);
+      result.push({
+        date: d,
+        label: i === 0 ? "Today" : i === 1 ? "Tomorrow" : d.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" }),
+        cards: scheduled.filter((c) => c.scheduledAt!.slice(0, 10) === dayStr),
+      });
+    }
+    return result;
+  }, [scheduled]);
+
+  return (
+    <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 8, marginBottom: 20 }}>
+      {days.map((day) => (
+        <div
+          key={day.date.toISOString()}
+          style={{
+            background: "#1a1a24",
+            borderRadius: 8,
+            padding: 10,
+            minHeight: 80,
+            border: day.label === "Today" ? "1px solid #7c6ef0" : "1px solid #2a2a35",
+          }}
+        >
+          <div style={{ fontSize: 11, fontWeight: 600, color: day.label === "Today" ? "#7c6ef0" : "#888", marginBottom: 6 }}>
+            {day.label}
+          </div>
+          {day.cards.length === 0 ? (
+            <div style={{ fontSize: 11, color: "#444" }}>-</div>
+          ) : (
+            day.cards.map((card) => (
+              <div
+                key={card.id}
+                style={{
+                  fontSize: 11,
+                  padding: "3px 6px",
+                  borderRadius: 4,
+                  background: "#252535",
+                  marginBottom: 4,
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                  whiteSpace: "nowrap" as const,
+                }}
+              >
+                <span style={styles.pill(PLATFORM_COLORS[card.platform] ?? "#888")}>{card.platform[0]}</span>{" "}
+                {card.topic.slice(0, 20)}
+              </div>
+            ))
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function CampaignsView({ onRefresh }: { onRefresh: () => void }) {
   const { data: campaigns, loading } = usePluginData<Campaign[]>("campaigns");
+  const { data: cards } = usePluginData<ContentCard[]>("pipeline");
   const execute = usePluginAction("execute-tool");
   const toast = usePluginToast();
   const hostCtx = useHostContext();
   const [newName, setNewName] = useState("");
+  const [viewMode, setViewMode] = useState<"list" | "calendar">("list");
 
   const handleCreate = useCallback(async () => {
     if (!newName.trim()) return;
@@ -800,8 +869,25 @@ function CampaignsView({ onRefresh }: { onRefresh: () => void }) {
   return (
     <div>
       <div style={styles.header}>
-        <h2 style={styles.h2}>Campaigns</h2>
+        <h2 style={styles.h2}>Campaigns & Schedule</h2>
+        <div style={{ display: "flex", gap: 8 }}>
+          <button
+            style={styles.btn(viewMode === "list" ? "primary" : "ghost")}
+            onClick={() => setViewMode("list")}
+          >
+            List
+          </button>
+          <button
+            style={styles.btn(viewMode === "calendar" ? "primary" : "ghost")}
+            onClick={() => setViewMode("calendar")}
+          >
+            Calendar
+          </button>
+        </div>
       </div>
+
+      {viewMode === "calendar" && <ScheduleCalendar cards={cards ?? []} />}
+
       <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
         <input
           style={{ ...styles.input, flex: 1 }}
