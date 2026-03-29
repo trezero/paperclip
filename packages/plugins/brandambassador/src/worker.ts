@@ -8,6 +8,9 @@ import {
   type CardStatus,
   type Platform,
 } from "./constants.js";
+import { TwitterAdapter } from "./services/platforms/twitterAdapter.js";
+import { RedditAdapter } from "./services/platforms/redditAdapter.js";
+import type { PlatformAdapter, EngagementMetrics } from "./services/platforms/adapter.js";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -150,6 +153,58 @@ async function setTemplates(ctx: PluginContext, companyId: string, templates: Co
 }
 
 // ---------------------------------------------------------------------------
+// Platform adapters (lazily configured from brand settings / secrets)
+// ---------------------------------------------------------------------------
+
+const twitterAdapter = new TwitterAdapter(null);
+const redditAdapter = new RedditAdapter(null);
+
+const adapterMap: Record<string, PlatformAdapter> = {
+  twitter: twitterAdapter,
+  reddit: redditAdapter,
+};
+
+function getAdapter(platform: Platform): PlatformAdapter | null {
+  return adapterMap[platform] ?? null;
+}
+
+async function refreshAdapterCredentials(ctx: PluginContext, companyId: string): Promise<void> {
+  const settings = await getBrandSettings(ctx, companyId);
+
+  // Twitter — resolve secret ref if configured
+  if (settings.twitterApiKey) {
+    try {
+      const key = await ctx.secrets.resolve(settings.twitterApiKey);
+      twitterAdapter.updateCredentials(key);
+    } catch {
+      twitterAdapter.updateCredentials(null);
+    }
+  } else {
+    twitterAdapter.updateCredentials(null);
+  }
+
+  // Reddit — resolve secret refs if configured
+  if (settings.redditClientId && settings.redditClientSecret) {
+    try {
+      const [clientId, clientSecret, refreshToken] = await Promise.all([
+        ctx.secrets.resolve(settings.redditClientId),
+        ctx.secrets.resolve(settings.redditClientSecret),
+        settings.redditClientId ? ctx.secrets.resolve("REDDIT_REFRESH_TOKEN").catch(() => "") : Promise.resolve(""),
+      ]);
+      if (clientId && clientSecret) {
+        redditAdapter.updateCredentials({ clientId, clientSecret, refreshToken });
+      } else {
+        redditAdapter.updateCredentials(null);
+      }
+    } catch {
+      redditAdapter.updateCredentials(null);
+    }
+  } else {
+    redditAdapter.updateCredentials(null);
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Inline tool logic (tools can't call each other via ctx.tools.execute)
 // ---------------------------------------------------------------------------
 
@@ -280,6 +335,8 @@ const plugin = definePlugin({
         { scopeKind: "company", scopeId: companyId, namespace: "brand", stateKey: "settings" },
         merged,
       );
+      // Refresh adapter credentials with new settings
+      await refreshAdapterCredentials(ctx, companyId);
       return { success: true, settings: merged };
     });
 
@@ -699,21 +756,217 @@ const plugin = definePlugin({
 
     ctx.jobs.register(JOB_KEYS.scheduledPublish, async (_job) => {
       ctx.logger.info("[ScheduledPublish] Checking for posts due...");
+
+      // Iterate all companies' cards — for now, use instance-level scan
+      // In production this would iterate tenant companies
+      const companiesRaw = await ctx.state.get({
+        scopeKind: "instance",
+        namespace: "registry",
+        stateKey: "active-companies",
+      });
+      const companyIds = (companiesRaw as string[] | null) ?? [];
+
+      for (const companyId of companyIds) {
+        await refreshAdapterCredentials(ctx, companyId);
+        const cards = await getCards(ctx, companyId);
+        const nowMs = Date.now();
+        let changed = false;
+
+        for (const card of cards) {
+          if (
+            card.scheduledAt &&
+            card.scheduledStatus === "pending" &&
+            card.status === "approved" &&
+            new Date(card.scheduledAt).getTime() <= nowMs
+          ) {
+            const adapter = getAdapter(card.platform);
+            if (!adapter) {
+              card.scheduledStatus = "failed";
+              card.publishError = `No adapter for platform: ${card.platform}`;
+              card.updatedAt = now();
+              changed = true;
+              continue;
+            }
+
+            card.scheduledStatus = "publishing";
+            card.publishAttempts += 1;
+            card.updatedAt = now();
+
+            try {
+              const result = await adapter.publish({
+                caption: card.caption,
+                platform: card.platform,
+                mediaRef: card.mediaRef ?? undefined,
+                mediaType: card.mediaType ?? undefined,
+                threadSplit: card.platform === "twitter",
+              });
+
+              if (result.success) {
+                card.status = "published";
+                card.platformPostRef = result.platformPostId;
+                card.scheduledStatus = null;
+                card.publishError = null;
+                ctx.logger.info(`[ScheduledPublish] Published card ${card.id} to ${card.platform}`);
+              } else {
+                card.scheduledStatus = "failed";
+                card.publishError = result.error ?? "Unknown error";
+              }
+            } catch (err: any) {
+              card.scheduledStatus = "failed";
+              card.publishError = err.message;
+            }
+
+            card.updatedAt = now();
+            changed = true;
+          }
+        }
+
+        if (changed) await setCards(ctx, companyId, cards);
+      }
     });
 
     ctx.jobs.register(JOB_KEYS.engagementPoll, async (_job) => {
       ctx.logger.info("[EngagementPoll] Polling platform APIs...");
+
+      const companiesRaw = await ctx.state.get({
+        scopeKind: "instance",
+        namespace: "registry",
+        stateKey: "active-companies",
+      });
+      const companyIds = (companiesRaw as string[] | null) ?? [];
+
+      for (const companyId of companyIds) {
+        await refreshAdapterCredentials(ctx, companyId);
+        const cards = await getCards(ctx, companyId);
+        const published = cards.filter((c) => c.status === "published" && c.platformPostRef);
+
+        for (const card of published) {
+          const adapter = getAdapter(card.platform);
+          if (!adapter) continue;
+
+          try {
+            const metrics: EngagementMetrics = await adapter.getEngagement({
+              platform: card.platform,
+              postId: card.platformPostRef!,
+              url: "",
+              publishedAt: card.updatedAt,
+            });
+
+            // Store engagement snapshot in state
+            const historyKey = `engagement:${card.id}`;
+            const historyRaw = await ctx.state.get({
+              scopeKind: "company",
+              scopeId: companyId,
+              namespace: "engagement",
+              stateKey: historyKey,
+            });
+            const history = (historyRaw as EngagementMetrics[] | null) ?? [];
+            history.push(metrics);
+            // Keep last 100 snapshots
+            if (history.length > 100) history.splice(0, history.length - 100);
+            await ctx.state.set(
+              { scopeKind: "company", scopeId: companyId, namespace: "engagement", stateKey: historyKey },
+              history,
+            );
+          } catch (err: any) {
+            ctx.logger.warn(`[EngagementPoll] Failed for card ${card.id}:`, { error: err.message });
+          }
+        }
+      }
     });
 
     ctx.jobs.register(JOB_KEYS.trendRefresh, async (_job) => {
       ctx.logger.info("[TrendRefresh] Refreshing trend feeds...");
+
+      const companiesRaw = await ctx.state.get({
+        scopeKind: "instance",
+        namespace: "registry",
+        stateKey: "active-companies",
+      });
+      const companyIds = (companiesRaw as string[] | null) ?? [];
+
+      for (const companyId of companyIds) {
+        await refreshAdapterCredentials(ctx, companyId);
+        const settings = await getBrandSettings(ctx, companyId);
+
+        // Gather trends from all configured adapters
+        const allTrends: any[] = [];
+        for (const platform of settings.platforms) {
+          const adapter = getAdapter(platform as Platform);
+          if (!adapter?.discoverTrends) continue;
+
+          try {
+            const items = await adapter.discoverTrends({
+              keywords: settings.defaultHashtags,
+              limit: 10,
+            });
+            allTrends.push(
+              ...items.map((item) => ({
+                id: item.id,
+                title: item.title,
+                source: adapter.platform,
+                platform: item.platform,
+                url: item.url,
+                score: item.score,
+                summary: item.content.slice(0, 200),
+                discoveredAt: new Date(item.timestamp).toISOString(),
+              })),
+            );
+          } catch (err: any) {
+            ctx.logger.warn(`[TrendRefresh] ${platform} discovery failed:`, { error: err.message });
+          }
+        }
+
+        if (allTrends.length > 0) {
+          // Merge with existing trends, dedupe by id
+          const existing = (await ctx.state.get({
+            scopeKind: "company",
+            scopeId: companyId,
+            namespace: "trends",
+            stateKey: "active",
+          })) as any[] | null ?? [];
+
+          const seenIds = new Set(existing.map((t: any) => t.id));
+          for (const t of allTrends) {
+            if (!seenIds.has(t.id)) {
+              existing.push(t);
+              seenIds.add(t.id);
+            }
+          }
+
+          // Keep latest 100 trends
+          existing.sort((a: any, b: any) => new Date(b.discoveredAt).getTime() - new Date(a.discoveredAt).getTime());
+          const trimmed = existing.slice(0, 100);
+
+          await ctx.state.set(
+            { scopeKind: "company", scopeId: companyId, namespace: "trends", stateKey: "active" },
+            trimmed,
+          );
+
+          ctx.streams.emit(STREAM_CHANNELS.trendsUpdated, { count: trimmed.length });
+        }
+      }
     });
 
     ctx.logger.info("BrandAmbassador plugin initialized — 12 tools, 3 jobs registered.");
   },
 
   async onHealth() {
-    return { status: "ok" as const, details: { version: "0.1.0" } };
+    const [twitterHealth, redditHealth] = await Promise.all([
+      twitterAdapter.health().catch((e: any) => ({ ok: false, reason: e.message })),
+      redditAdapter.health().catch((e: any) => ({ ok: false, reason: e.message })),
+    ]);
+
+    return {
+      status: "ok" as const,
+      details: {
+        version: "0.1.0",
+        adapters: {
+          twitter: twitterHealth,
+          reddit: redditHealth,
+        },
+      },
+    };
   },
 
   async onWebhook(input: PluginWebhookInput) {
