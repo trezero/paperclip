@@ -10,7 +10,10 @@ import {
 } from "./constants.js";
 import { TwitterAdapter } from "./services/platforms/twitterAdapter.js";
 import { RedditAdapter } from "./services/platforms/redditAdapter.js";
+import { TelegramAdapter } from "./services/platforms/telegramAdapter.js";
+import { RssAppAdapter, dedupeAndMerge, scoreItems } from "./services/platforms/rssAppAdapter.js";
 import type { PlatformAdapter, EngagementMetrics } from "./services/platforms/adapter.js";
+import type { WebhookPayload } from "./services/platforms/rssAppAdapter.js";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -156,12 +159,17 @@ async function setTemplates(ctx: PluginContext, companyId: string, templates: Co
 // Platform adapters (lazily configured from brand settings / secrets)
 // ---------------------------------------------------------------------------
 
+let currentCtx: PluginContext | null = null;
+
 const twitterAdapter = new TwitterAdapter(null);
 const redditAdapter = new RedditAdapter(null);
+const telegramAdapter = new TelegramAdapter(null);
+const rssAppAdapter = new RssAppAdapter(null);
 
 const adapterMap: Record<string, PlatformAdapter> = {
   twitter: twitterAdapter,
   reddit: redditAdapter,
+  telegram: telegramAdapter,
 };
 
 function getAdapter(platform: Platform): PlatformAdapter | null {
@@ -189,7 +197,7 @@ async function refreshAdapterCredentials(ctx: PluginContext, companyId: string):
       const [clientId, clientSecret, refreshToken] = await Promise.all([
         ctx.secrets.resolve(settings.redditClientId),
         ctx.secrets.resolve(settings.redditClientSecret),
-        settings.redditClientId ? ctx.secrets.resolve("REDDIT_REFRESH_TOKEN").catch(() => "") : Promise.resolve(""),
+        ctx.secrets.resolve("REDDIT_REFRESH_TOKEN").catch(() => ""),
       ]);
       if (clientId && clientSecret) {
         redditAdapter.updateCredentials({ clientId, clientSecret, refreshToken });
@@ -201,6 +209,36 @@ async function refreshAdapterCredentials(ctx: PluginContext, companyId: string):
     }
   } else {
     redditAdapter.updateCredentials(null);
+  }
+
+  // Telegram — resolve bot token + channel IDs
+  if (settings.telegramBotToken) {
+    try {
+      const botToken = await ctx.secrets.resolve(settings.telegramBotToken);
+      const channelIds = settings.telegramChannelId
+        ? settings.telegramChannelId.split(",").map((s) => s.trim()).filter(Boolean)
+        : [];
+      telegramAdapter.updateCredentials(botToken ? { botToken, channelIds } : null);
+    } catch {
+      telegramAdapter.updateCredentials(null);
+    }
+  } else {
+    telegramAdapter.updateCredentials(null);
+  }
+
+  // RSS.app — resolve API key + secret
+  if (settings.rssAppApiKey) {
+    try {
+      const [apiKey, apiSecret] = await Promise.all([
+        ctx.secrets.resolve(settings.rssAppApiKey),
+        settings.rssAppSecret ? ctx.secrets.resolve(settings.rssAppSecret) : Promise.resolve(""),
+      ]);
+      rssAppAdapter.updateCredentials(apiKey ? { apiKey, apiSecret } : null);
+    } catch {
+      rssAppAdapter.updateCredentials(null);
+    }
+  } else {
+    rssAppAdapter.updateCredentials(null);
   }
 }
 
@@ -291,6 +329,7 @@ const toolDecl = (displayName: string, description: string) => ({
 
 const plugin = definePlugin({
   async setup(ctx: PluginContext) {
+    currentCtx = ctx;
     ctx.logger.info("BrandAmbassador plugin initializing...");
 
     // ------------------------------------------------------------------
@@ -952,9 +991,11 @@ const plugin = definePlugin({
   },
 
   async onHealth() {
-    const [twitterHealth, redditHealth] = await Promise.all([
+    const [twitterHealth, redditHealth, telegramHealth, rssAppHealth] = await Promise.all([
       twitterAdapter.health().catch((e: any) => ({ ok: false, reason: e.message })),
       redditAdapter.health().catch((e: any) => ({ ok: false, reason: e.message })),
+      telegramAdapter.health().catch((e: any) => ({ ok: false, reason: e.message })),
+      rssAppAdapter.health().catch((e: any) => ({ ok: false, reason: e.message })),
     ]);
 
     return {
@@ -964,14 +1005,54 @@ const plugin = definePlugin({
         adapters: {
           twitter: twitterHealth,
           reddit: redditHealth,
+          telegram: telegramHealth,
+          rssApp: rssAppHealth,
         },
       },
     };
   },
 
   async onWebhook(input: PluginWebhookInput) {
-    // Handle RSS.app webhook pushes
-    void input;
+    if (input.endpointKey !== "rssapp") return;
+
+    const ctx = currentCtx;
+    if (!ctx) return;
+
+    const payload = input.parsedBody as WebhookPayload | undefined;
+    if (!payload?.items?.length) return;
+
+    // We need a companyId — for single-tenant, use the first active company
+    const companiesRaw = await ctx.state.get({
+      scopeKind: "instance",
+      namespace: "registry",
+      stateKey: "active-companies",
+    });
+    const companyIds = (companiesRaw as string[] | null) ?? [];
+    if (companyIds.length === 0) return;
+
+    const companyId = companyIds[0];
+    const settings = await getBrandSettings(ctx, companyId);
+
+    // Score incoming items
+    const scored = scoreItems(payload.items, settings.defaultHashtags);
+
+    // Merge with existing trends
+    const existingRaw = await ctx.state.get({
+      scopeKind: "company",
+      scopeId: companyId,
+      namespace: "trends",
+      stateKey: "active",
+    });
+    const existing = (existingRaw as any[] | null) ?? [];
+    const merged = dedupeAndMerge(existing, scored).slice(0, 100);
+
+    await ctx.state.set(
+      { scopeKind: "company", scopeId: companyId, namespace: "trends", stateKey: "active" },
+      merged,
+    );
+
+    ctx.streams.emit(STREAM_CHANNELS.trendsUpdated, { count: merged.length, source: "webhook" });
+    ctx.logger.info(`[RSS.app Webhook] Processed ${payload.items.length} items, ${merged.length} active trends`);
   },
 
   async onShutdown() {
