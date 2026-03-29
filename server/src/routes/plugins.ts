@@ -913,6 +913,60 @@ export function pluginRoutes(
       assertCompanyAccess(req, body.companyId);
     }
 
+    // -----------------------------------------------------------------------
+    // Host-level intercept: route "execute-tool" through the tool dispatcher
+    // instead of forwarding to the worker. This ensures tool calls from
+    // plugin UI follow the same path as agent tool calls (audit, permissions).
+    // -----------------------------------------------------------------------
+    if (body.key === "execute-tool" && toolDeps) {
+      const toolName = (body.params as Record<string, unknown> | undefined)?.toolName;
+      const parameters = (body.params as Record<string, unknown> | undefined)?.parameters ?? {};
+      const runCtx = (body.params as Record<string, unknown> | undefined)?.runContext as
+        | Record<string, unknown>
+        | undefined;
+
+      if (!toolName || typeof toolName !== "string") {
+        res.status(400).json({ error: '"params.toolName" is required for execute-tool' });
+        return;
+      }
+
+      // Namespace bare tool name with the plugin's key
+      const namespacedTool = toolName.includes(":")
+        ? toolName
+        : `${plugin.pluginKey}:${toolName}`;
+
+      // Synthesize a ToolRunContext — board operators don't have agentId/runId
+      const toolRunContext: ToolRunContext = {
+        agentId: (runCtx?.agentId as string) ?? "board-operator",
+        runId: (runCtx?.runId as string) ?? randomUUID(),
+        companyId: (runCtx?.companyId as string) ?? body.companyId ?? "",
+        projectId: (runCtx?.projectId as string) ?? "",
+      };
+
+      const registeredTool = toolDeps.toolDispatcher.getTool(namespacedTool);
+      if (!registeredTool) {
+        res.status(404).json({ error: `Tool "${namespacedTool}" not found` });
+        return;
+      }
+
+      try {
+        const result = await toolDeps.toolDispatcher.executeTool(
+          namespacedTool,
+          parameters,
+          toolRunContext,
+        );
+        res.json({ data: result });
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        if (message.includes("not running") || message.includes("worker")) {
+          res.status(502).json({ error: message });
+        } else {
+          res.status(500).json({ error: message });
+        }
+      }
+      return;
+    }
+
     try {
       const result = await bridgeDeps.workerManager.call(
         plugin.id,
@@ -996,6 +1050,20 @@ export function pluginRoutes(
       assertCompanyAccess(req, body.companyId);
     }
 
+    // Host-level intercept: serve tool schemas from the registry directly.
+    // This avoids a worker round-trip and works even if the worker is restarting.
+    if (key === "tool-schemas" && toolDeps) {
+      const tools = toolDeps.toolDispatcher.listToolsForAgent({ pluginId: plugin.id });
+      const schemas = tools.map((t) => ({
+        name: t.name.includes(":") ? t.name.split(":")[1] : t.name,
+        displayName: t.displayName,
+        description: t.description,
+        parametersSchema: t.parametersSchema,
+      }));
+      res.json({ data: { tools: schemas } });
+      return;
+    }
+
     try {
       const result = await bridgeDeps.workerManager.call(
         plugin.id,
@@ -1073,6 +1141,52 @@ export function pluginRoutes(
 
     if (body?.companyId) {
       assertCompanyAccess(req, body.companyId);
+    }
+
+    // Host-level intercept: route "execute-tool" through the tool dispatcher
+    if (key === "execute-tool" && toolDeps) {
+      const toolName = body?.params?.toolName;
+      const parameters = body?.params?.parameters ?? {};
+      const runCtx = body?.params?.runContext as Record<string, unknown> | undefined;
+
+      if (!toolName || typeof toolName !== "string") {
+        res.status(400).json({ error: '"params.toolName" is required for execute-tool' });
+        return;
+      }
+
+      const namespacedTool = (toolName as string).includes(":")
+        ? toolName as string
+        : `${plugin.pluginKey}:${toolName}`;
+
+      const toolRunContext: ToolRunContext = {
+        agentId: (runCtx?.agentId as string) ?? "board-operator",
+        runId: (runCtx?.runId as string) ?? randomUUID(),
+        companyId: (runCtx?.companyId as string) ?? body?.companyId ?? "",
+        projectId: (runCtx?.projectId as string) ?? "",
+      };
+
+      const registeredTool = toolDeps.toolDispatcher.getTool(namespacedTool);
+      if (!registeredTool) {
+        res.status(404).json({ error: `Tool "${namespacedTool}" not found` });
+        return;
+      }
+
+      try {
+        const result = await toolDeps.toolDispatcher.executeTool(
+          namespacedTool,
+          parameters,
+          toolRunContext,
+        );
+        res.json({ data: result });
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        if (message.includes("not running") || message.includes("worker")) {
+          res.status(502).json({ error: message });
+        } else {
+          res.status(500).json({ error: message });
+        }
+      }
+      return;
     }
 
     try {
