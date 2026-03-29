@@ -11,6 +11,7 @@ data/
 .pnpm-store/
 tmp-*
 cli/tmp/
+e2e-screenshots/
 
 # Scratch/seed scripts (but not scripts/ dir)
 check-*.mjs
@@ -50,3 +51,10 @@ tests/release-smoke/test-results/
 tests/release-smoke/playwright-report/
 .superset/
 .claude/worktrees/
+.claude/plugins/
+.claude/skills/
+.claude/archon-config.json
+.claude/archon-state.json
+.claude/archon-memory-buffer.jsonl
+.mcp.json
+.archon/
