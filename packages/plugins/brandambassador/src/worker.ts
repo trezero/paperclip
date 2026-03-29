@@ -691,14 +691,96 @@ const plugin = definePlugin({
     });
 
     ctx.actions.register("execute-tool", async (params) => {
-      // Bridge adapter: UI calls action, we dispatch to internal tool logic
       const { toolName, parameters, runContext } = params as {
         toolName: string;
         parameters: Record<string, unknown>;
         runContext: Partial<ToolRunContext>;
       };
-      // For now, return an acknowledgment — full tool dispatch will be wired later
-      return { success: true, toolName, note: "Tool execution via bridge not yet implemented" };
+      const companyId = (runContext?.companyId ?? "") as string;
+      const runCtx: ToolRunContext = {
+        companyId,
+        agentId: (runContext?.agentId as string) ?? "",
+        runId: (runContext?.runId as string) ?? "",
+        projectId: (runContext?.projectId as string) ?? "",
+      };
+      const p = parameters;
+
+      switch (toolName) {
+        case TOOL_NAMES.checkTrends: {
+          const raw = await ctx.state.get({
+            scopeKind: "company", scopeId: companyId, namespace: "trends", stateKey: "active",
+          });
+          let trends = (raw as any[] | null) ?? [];
+          const platforms = p.platforms as string[] | undefined;
+          if (platforms?.length) trends = trends.filter((t: any) => platforms.includes(t.platform));
+          return { success: true, data: trends.slice(0, (p.limit as number) || 10) };
+        }
+        case TOOL_NAMES.generateCaption: {
+          const result = await generateCaptionLogic(
+            ctx, p.topic as string, (p.platform as Platform) ?? "twitter", p.tone as string | undefined, companyId,
+          );
+          return { success: true, data: result };
+        }
+        case TOOL_NAMES.generateMedia: {
+          const result = await generateMediaLogic(
+            ctx, (p.caption as string) ?? "", (p.platform as Platform) ?? "twitter", p.style as string | undefined,
+          );
+          return { success: true, data: result };
+        }
+        case TOOL_NAMES.moderateContent: {
+          const result = moderateContentLogic(p.caption as string, (p.platform as Platform) ?? "twitter");
+          return { success: true, data: result };
+        }
+        case TOOL_NAMES.generatePost: {
+          const captionResult = await generateCaptionLogic(
+            ctx, p.topic as string, (p.platform as Platform) ?? "twitter", p.tone as string | undefined, companyId,
+          );
+          let mediaRef: string | null = null;
+          let mediaType: "image" | "video" | null = null;
+          if (!p.skipMedia) {
+            const media = await generateMediaLogic(ctx, captionResult.caption, (p.platform as Platform) ?? "twitter");
+            mediaRef = media.mediaRef;
+            mediaType = media.mediaType;
+          }
+          const mod = moderateContentLogic(captionResult.caption, (p.platform as Platform) ?? "twitter");
+          const card = createCardFromParts(
+            p.topic as string, captionResult.caption, (p.platform as Platform) ?? "twitter",
+            mediaRef, mediaType, mod.score, runCtx,
+          );
+          const cards = await getCards(ctx, companyId);
+          cards.push(card);
+          await setCards(ctx, companyId, cards);
+          return { success: true, data: { cardId: card.id, card, moderation: mod } };
+        }
+        case TOOL_NAMES.dismissTrend: {
+          const raw = await ctx.state.get({
+            scopeKind: "company", scopeId: companyId, namespace: "trends", stateKey: "active",
+          });
+          const trends = (raw as any[] | null) ?? [];
+          await ctx.state.set(
+            { scopeKind: "company", scopeId: companyId, namespace: "trends", stateKey: "active" },
+            trends.filter((t: any) => t.id !== p.trendId),
+          );
+          return { success: true };
+        }
+        case TOOL_NAMES.manageCampaign: {
+          const campaigns = await getCampaigns(ctx, companyId);
+          if (p.action === "create") {
+            const c: Campaign = {
+              id: uuid(), name: (p.name as string) ?? "Untitled", description: (p.description as string) ?? "",
+              platforms: (p.platforms as Platform[]) ?? [], startDate: (p.startDate as string) ?? null,
+              endDate: (p.endDate as string) ?? null, createdAt: now(), updatedAt: now(),
+            };
+            campaigns.push(c);
+            await setCampaigns(ctx, companyId, campaigns);
+            return { success: true, data: c };
+          }
+          if (p.action === "list") return { success: true, data: campaigns };
+          return { success: true };
+        }
+        default:
+          return { success: false, error: `Unknown tool: ${toolName}` };
+      }
     });
 
     // ------------------------------------------------------------------
