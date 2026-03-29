@@ -246,6 +246,20 @@ async function refreshAdapterCredentials(ctx: PluginContext, companyId: string):
 // Inline tool logic (tools can't call each other via ctx.tools.execute)
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// Platform constraints
+// ---------------------------------------------------------------------------
+
+const PLATFORM_LIMITS: Record<Platform, { maxChars: number; style: string }> = {
+  twitter: { maxChars: 280, style: "punchy, concise, use thread format if needed" },
+  reddit: { maxChars: 10000, style: "informative, discussion-starting, use markdown" },
+  telegram: { maxChars: 4096, style: "clean, emoji-friendly, markdown supported" },
+};
+
+// ---------------------------------------------------------------------------
+// LLM-powered caption generation
+// ---------------------------------------------------------------------------
+
 async function generateCaptionLogic(
   ctx: PluginContext,
   topic: string,
@@ -255,31 +269,291 @@ async function generateCaptionLogic(
 ): Promise<{ caption: string; tone: string }> {
   const settings = await getBrandSettings(ctx, companyId);
   const effectiveTone = tone ?? settings.tone;
+  const limit = PLATFORM_LIMITS[platform];
   const tags = settings.defaultHashtags.length
-    ? "#" + settings.defaultHashtags.join(" #")
-    : "#crypto";
-  const caption = `${topic} — ${effectiveTone} take for ${platform}. ${tags}`;
+    ? settings.defaultHashtags.map((t) => `#${t}`).join(" ")
+    : "";
+
+  // Try LLM generation via outbound HTTP (OpenRouter or similar)
+  try {
+    const apiKeyRef = await ctx.state.get({
+      scopeKind: "company",
+      scopeId: companyId,
+      namespace: "brand",
+      stateKey: "llm-api-key-ref",
+    });
+
+    if (apiKeyRef) {
+      const apiKey = await ctx.secrets.resolve(apiKeyRef as string);
+      const prompt = [
+        `You are a social media content creator for a crypto/web3 brand.`,
+        `Brand voice: ${effectiveTone}. Target audience: ${settings.audience}.`,
+        `Platform: ${platform} (max ${limit.maxChars} chars, style: ${limit.style}).`,
+        tags ? `Include these hashtags naturally: ${tags}` : "",
+        `Write a single ${platform} post about: ${topic}`,
+        `Return ONLY the post text, no quotes, no explanation.`,
+      ]
+        .filter(Boolean)
+        .join("\n");
+
+      const res = await ctx.http.fetch("https://openrouter.ai/api/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${apiKey}`,
+        },
+        body: JSON.stringify({
+          model: "google/gemini-2.5-flash-preview",
+          messages: [{ role: "user", content: prompt }],
+          max_tokens: 500,
+        }),
+      });
+
+      if (res.ok) {
+        const json = (await res.json()) as {
+          choices?: Array<{ message?: { content?: string } }>;
+        };
+        const content = json.choices?.[0]?.message?.content?.trim();
+        if (content) {
+          return { caption: content.slice(0, limit.maxChars), tone: effectiveTone };
+        }
+      }
+    }
+  } catch (err) {
+    ctx.logger.warn("LLM caption generation failed, using template fallback", {
+      error: (err as Error).message,
+    });
+  }
+
+  // Fallback: template-based caption
+  const caption = `${topic} — ${effectiveTone} take for ${platform}. ${tags}`.slice(
+    0,
+    limit.maxChars,
+  );
   return { caption, tone: effectiveTone };
 }
 
-function generateMediaLogic(ctx: PluginContext): { mediaRef: string; mediaType: "image" } {
+// ---------------------------------------------------------------------------
+// Media generation (ComfyUI delegation)
+// ---------------------------------------------------------------------------
+
+const COMFYUI_API = "http://172.16.1.222:8188";
+
+async function generateMediaLogic(
+  ctx: PluginContext,
+  caption: string,
+  platform: Platform,
+  style?: string,
+): Promise<{ mediaRef: string | null; mediaType: "image" | null }> {
   ctx.streams.emit(STREAM_CHANNELS.generationProgress, { stage: "queued", progress: 0 });
-  const mediaRef = `media_${uuid()}.png`;
-  ctx.streams.emit(STREAM_CHANNELS.generationProgress, { stage: "complete", progress: 1, outputFile: mediaRef });
-  return { mediaRef, mediaType: "image" };
+
+  try {
+    // Build a simple txt2img prompt from the caption
+    const prompt = `${style ?? "vibrant digital art"}, crypto meme style: ${caption.slice(0, 200)}`;
+
+    const dimensions =
+      platform === "twitter"
+        ? { width: 1200, height: 675 }
+        : platform === "reddit"
+          ? { width: 1200, height: 628 }
+          : { width: 1080, height: 1080 };
+
+    // Queue a workflow on ComfyUI
+    const queueRes = await ctx.http.fetch(`${COMFYUI_API}/prompt`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        prompt: {
+          "3": {
+            class_type: "KSampler",
+            inputs: {
+              seed: Math.floor(Math.random() * 2 ** 32),
+              steps: 20,
+              cfg: 7,
+              sampler_name: "euler",
+              scheduler: "normal",
+              denoise: 1,
+              model: ["4", 0],
+              positive: ["6", 0],
+              negative: ["7", 0],
+              latent_image: ["5", 0],
+            },
+          },
+          "4": {
+            class_type: "CheckpointLoaderSimple",
+            inputs: { ckpt_name: "sd_xl_base_1.0.safetensors" },
+          },
+          "5": {
+            class_type: "EmptyLatentImage",
+            inputs: { width: dimensions.width, height: dimensions.height, batch_size: 1 },
+          },
+          "6": {
+            class_type: "CLIPTextEncode",
+            inputs: { text: prompt, clip: ["4", 1] },
+          },
+          "7": {
+            class_type: "CLIPTextEncode",
+            inputs: { text: "blurry, low quality, text, watermark", clip: ["4", 1] },
+          },
+          "8": {
+            class_type: "VAEDecode",
+            inputs: { samples: ["3", 0], vae: ["4", 2] },
+          },
+          "9": {
+            class_type: "SaveImage",
+            inputs: { filename_prefix: "brandambassador", images: ["8", 0] },
+          },
+        },
+      }),
+    });
+
+    if (!queueRes.ok) {
+      ctx.logger.warn("ComfyUI queue failed", { status: queueRes.status });
+      ctx.streams.emit(STREAM_CHANNELS.generationProgress, {
+        stage: "failed",
+        progress: 0,
+        error: `ComfyUI returned ${queueRes.status}`,
+      });
+      return { mediaRef: null, mediaType: null };
+    }
+
+    const queueData = (await queueRes.json()) as { prompt_id?: string };
+    const promptId = queueData.prompt_id;
+    if (!promptId) {
+      return { mediaRef: null, mediaType: null };
+    }
+
+    ctx.streams.emit(STREAM_CHANNELS.generationProgress, {
+      stage: "generating",
+      progress: 0.3,
+      promptId,
+    });
+
+    // Poll for completion (max 60s)
+    let outputFile: string | null = null;
+    for (let i = 0; i < 30; i++) {
+      await new Promise((r) => setTimeout(r, 2000));
+
+      const histRes = await ctx.http.fetch(`${COMFYUI_API}/history/${promptId}`);
+      if (!histRes.ok) continue;
+
+      const hist = (await histRes.json()) as Record<
+        string,
+        { outputs?: Record<string, { images?: Array<{ filename: string }> }> }
+      >;
+      const entry = hist[promptId];
+      if (entry?.outputs) {
+        for (const nodeOutput of Object.values(entry.outputs)) {
+          if (nodeOutput.images?.[0]?.filename) {
+            outputFile = nodeOutput.images[0].filename;
+            break;
+          }
+        }
+        if (outputFile) break;
+      }
+
+      ctx.streams.emit(STREAM_CHANNELS.generationProgress, {
+        stage: "generating",
+        progress: 0.3 + (i / 30) * 0.6,
+      });
+    }
+
+    if (outputFile) {
+      const mediaRef = `${COMFYUI_API}/view?filename=${encodeURIComponent(outputFile)}`;
+      ctx.streams.emit(STREAM_CHANNELS.generationProgress, {
+        stage: "complete",
+        progress: 1,
+        outputFile: mediaRef,
+      });
+      return { mediaRef, mediaType: "image" };
+    }
+
+    ctx.streams.emit(STREAM_CHANNELS.generationProgress, {
+      stage: "failed",
+      progress: 0,
+      error: "Timed out waiting for ComfyUI",
+    });
+    return { mediaRef: null, mediaType: null };
+  } catch (err) {
+    ctx.logger.warn("ComfyUI media generation failed", { error: (err as Error).message });
+    ctx.streams.emit(STREAM_CHANNELS.generationProgress, {
+      stage: "failed",
+      progress: 0,
+      error: (err as Error).message,
+    });
+    return { mediaRef: null, mediaType: null };
+  }
 }
 
-function moderateContentLogic(caption: string): { score: number; issues: string[] } {
+// ---------------------------------------------------------------------------
+// Content moderation scoring
+// ---------------------------------------------------------------------------
+
+const PROFANITY_RE =
+  /\b(fuck|shit|damn|ass|bitch|bastard|crap|dick|piss)\b/gi;
+const SCAM_RE =
+  /\b(guaranteed returns|100x|send sol|airdrop claim|dm for|limited spots)\b/gi;
+const FINANCIAL_ADVICE_RE =
+  /\b(not financial advice|nfa|financial advice|buy now|sell now|you should invest)\b/gi;
+const ALL_CAPS_THRESHOLD = 0.5; // more than 50% caps is spammy
+
+function moderateContentLogic(
+  caption: string,
+  platform: Platform,
+): { score: number; issues: string[] } {
   const issues: string[] = [];
-  let score = 85;
-  if (caption.length > 280) {
-    issues.push("Caption exceeds Twitter character limit");
-    score -= 10;
+  let score = 100;
+
+  // Platform character limit
+  const limit = PLATFORM_LIMITS[platform].maxChars;
+  if (caption.length > limit) {
+    issues.push(`Exceeds ${platform} character limit (${caption.length}/${limit})`);
+    score -= 15;
   }
-  if (/fuck|shit|damn/i.test(caption)) {
-    issues.push("Contains profanity");
+
+  // Profanity
+  const profanityMatches = caption.match(PROFANITY_RE);
+  if (profanityMatches) {
+    issues.push(`Contains profanity: ${profanityMatches.slice(0, 3).join(", ")}`);
     score -= 20;
   }
+
+  // Scam patterns
+  const scamMatches = caption.match(SCAM_RE);
+  if (scamMatches) {
+    issues.push(`Contains scam-like language: ${scamMatches.slice(0, 3).join(", ")}`);
+    score -= 30;
+  }
+
+  // Financial advice disclaimer
+  if (FINANCIAL_ADVICE_RE.test(caption)) {
+    issues.push("Contains financial advice language — review for compliance");
+    score -= 10;
+  }
+
+  // Excessive caps (spammy)
+  const letters = caption.replace(/[^a-zA-Z]/g, "");
+  if (letters.length > 10) {
+    const capsRatio = (caption.replace(/[^A-Z]/g, "").length) / letters.length;
+    if (capsRatio > ALL_CAPS_THRESHOLD) {
+      issues.push("Excessive use of capital letters");
+      score -= 10;
+    }
+  }
+
+  // Excessive hashtags
+  const hashtagCount = (caption.match(/#\w+/g) ?? []).length;
+  if (hashtagCount > 10) {
+    issues.push(`Too many hashtags (${hashtagCount})`);
+    score -= 10;
+  }
+
+  // Empty or too short
+  if (caption.trim().length < 10) {
+    issues.push("Caption is too short");
+    score -= 30;
+  }
+
   return { score: Math.max(0, Math.min(100, score)), issues };
 }
 
@@ -436,21 +710,58 @@ const plugin = definePlugin({
       toolDecl("Check Trends", "Discover trending topics across configured platforms"),
       async (params, runCtx): Promise<ToolResult> => {
         const companyId = runCtx.companyId;
+        const platformFilter = (params as any)?.platforms as string[] | undefined;
+        const limit = ((params as any)?.limit as number) || 10;
+
+        // Read stored trends
         const raw = await ctx.state.get({
           scopeKind: "company",
           scopeId: companyId,
           namespace: "trends",
           stateKey: "active",
         });
-        const trends = (raw as any[] | null) ?? [];
-        const platformFilter = (params as any)?.platforms as string[] | undefined;
-        const limit = ((params as any)?.limit as number) || 10;
-        let filtered = trends;
+        let trends = (raw as any[] | null) ?? [];
+
+        // Also fetch live from adapters if specific platforms requested
         if (platformFilter?.length) {
-          filtered = trends.filter((t: any) => platformFilter.includes(t.platform));
+          await refreshAdapterCredentials(ctx, companyId);
+          const settings = await getBrandSettings(ctx, companyId);
+
+          for (const platform of platformFilter) {
+            const adapter = getAdapter(platform as Platform);
+            if (!adapter?.discoverTrends) continue;
+            try {
+              const live = await adapter.discoverTrends({
+                keywords: settings.defaultHashtags,
+                limit: 5,
+              });
+              for (const item of live) {
+                if (!trends.some((t: any) => t.id === item.id)) {
+                  trends.push({
+                    id: item.id,
+                    title: item.title,
+                    source: adapter.platform,
+                    platform: item.platform,
+                    url: item.url,
+                    score: item.score,
+                    summary: item.content.slice(0, 200),
+                    discoveredAt: new Date(item.timestamp).toISOString(),
+                  });
+                }
+              }
+            } catch (err: any) {
+              ctx.logger.warn(`Live trend fetch from ${platform} failed: ${err.message}`);
+            }
+          }
+
+          // Filter by requested platforms
+          trends = trends.filter((t: any) => platformFilter.includes(t.platform));
         }
-        filtered = filtered.slice(0, limit);
-        return { content: `Found ${filtered.length} trending topics.`, data: filtered };
+
+        // Sort by score descending and limit
+        trends.sort((a: any, b: any) => (b.score ?? 0) - (a.score ?? 0));
+        const result = trends.slice(0, limit);
+        return { content: `Found ${result.length} trending topics.`, data: result };
       },
     );
 
@@ -467,9 +778,13 @@ const plugin = definePlugin({
     ctx.tools.register(
       TOOL_NAMES.generateMedia,
       toolDecl("Generate Media", "Generate media via ComfyUI"),
-      async (_params, _runCtx): Promise<ToolResult> => {
-        const result = generateMediaLogic(ctx);
-        return { content: `Generated media: ${result.mediaRef}`, data: result };
+      async (params, _runCtx): Promise<ToolResult> => {
+        const { caption, platform, style } = params as { caption: string; platform: Platform; style?: string };
+        const result = await generateMediaLogic(ctx, caption ?? "", platform ?? "twitter", style);
+        if (result.mediaRef) {
+          return { content: `Generated media: ${result.mediaRef}`, data: result };
+        }
+        return { content: "Media generation failed or ComfyUI unavailable", data: result };
       },
     );
 
@@ -477,8 +792,8 @@ const plugin = definePlugin({
       TOOL_NAMES.moderateContent,
       toolDecl("Moderate Content", "Score content for safety and brand compliance"),
       async (params): Promise<ToolResult> => {
-        const { caption } = params as { caption: string };
-        const result = moderateContentLogic(caption);
+        const { caption, platform } = params as { caption: string; platform?: Platform };
+        const result = moderateContentLogic(caption, platform ?? "twitter");
         return {
           content: `Moderation score: ${result.score}/100. ${result.issues.length ? "Issues: " + result.issues.join(", ") : "No issues."}`,
           data: result,
@@ -497,27 +812,40 @@ const plugin = definePlugin({
           skipMedia?: boolean;
         };
 
+        // Step 1: Generate caption (LLM-powered with template fallback)
         const captionResult = await generateCaptionLogic(ctx, topic, platform, tone, runCtx.companyId);
         const caption = captionResult.caption;
 
+        // Step 2: Generate media (ComfyUI with graceful failure)
         let mediaRef: string | null = null;
         let mediaType: "image" | "video" | null = null;
         if (!skipMedia) {
-          const media = generateMediaLogic(ctx);
+          const media = await generateMediaLogic(ctx, caption, platform);
           mediaRef = media.mediaRef;
           mediaType = media.mediaType;
         }
 
-        const mod = moderateContentLogic(caption);
-        const card = createCardFromParts(topic, caption, platform, mediaRef, mediaType, mod.score, runCtx);
+        // Step 3: Moderate content (platform-aware)
+        const mod = moderateContentLogic(caption, platform);
 
+        // Step 4: Create card and persist
+        const card = createCardFromParts(topic, caption, platform, mediaRef, mediaType, mod.score, runCtx);
         const cards = await getCards(ctx, runCtx.companyId);
         cards.push(card);
         await setCards(ctx, runCtx.companyId, cards);
 
+        // Step 5: Log activity
+        await ctx.activity.log({
+          companyId: runCtx.companyId,
+          entityType: "pipelineCard",
+          entityId: card.id,
+          message: `Generated ${platform} post: "${topic}" (score: ${mod.score}/100)`,
+          metadata: { platform, tone: captionResult.tone, hasMedia: !!mediaRef, source: card.source },
+        });
+
         return {
-          content: `Post created: "${caption}" (moderation: ${mod.score}/100)`,
-          data: { cardId: card.id, card },
+          content: `Post created: "${caption.slice(0, 80)}${caption.length > 80 ? "..." : ""}" (moderation: ${mod.score}/100${mod.issues.length ? ", issues: " + mod.issues.join(", ") : ""})`,
+          data: { cardId: card.id, card, moderation: mod },
         };
       },
     );
