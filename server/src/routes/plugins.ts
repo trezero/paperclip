@@ -1123,7 +1123,15 @@ export function pluginRoutes(
     assertBoard(req);
 
     if (!bridgeDeps?.streamBus) {
-      res.status(501).json({ error: "Plugin stream bridge is not enabled" });
+      // Return a graceful SSE close instead of 501 so EventSource clients
+      // disconnect cleanly without logging console errors.
+      res.writeHead(200, {
+        "Content-Type": "text/event-stream",
+        "Cache-Control": "no-cache",
+        Connection: "keep-alive",
+      });
+      res.write("event: close\ndata: {}\n\n");
+      res.end();
       return;
     }
 
