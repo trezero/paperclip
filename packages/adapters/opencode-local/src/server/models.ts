@@ -6,18 +6,10 @@ import {
   ensurePathInEnv,
   runChildProcess,
 } from "@paperclipai/adapter-utils/server-utils";
+import { resolveOpenCodeCommand } from "./command.js";
 
 const MODELS_CACHE_TTL_MS = 60_000;
 const MODELS_DISCOVERY_TIMEOUT_MS = 20_000;
-
-function resolveOpenCodeCommand(input: unknown): string {
-  const envOverride =
-    typeof process.env.PAPERCLIP_OPENCODE_COMMAND === "string" &&
-    process.env.PAPERCLIP_OPENCODE_COMMAND.trim().length > 0
-      ? process.env.PAPERCLIP_OPENCODE_COMMAND.trim()
-      : "opencode";
-  return asString(input, envOverride);
-}
 
 const discoveryCache = new Map<string, { expiresAt: number; models: AdapterModel[] }>();
 const VOLATILE_ENV_KEY_PREFIXES = ["PAPERCLIP_", "npm_", "NPM_"] as const;
