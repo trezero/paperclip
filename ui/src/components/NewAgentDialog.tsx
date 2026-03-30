@@ -26,6 +26,7 @@ type AdvancedAdapterType =
   | "claude_local"
   | "codex_local"
   | "gemini_local"
+  | "openrouter"
   | "opencode_local"
   | "pi_local"
   | "cursor"
@@ -57,6 +58,12 @@ const ADVANCED_ADAPTER_OPTIONS: Array<{
     label: "Gemini CLI",
     icon: Gem,
     desc: "Local Gemini agent",
+  },
+  {
+    value: "openrouter",
+    label: "OpenRouter",
+    icon: Bot,
+    desc: "Direct OpenRouter text agent",
   },
   {
     value: "opencode_local",

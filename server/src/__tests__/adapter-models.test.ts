@@ -1,7 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { models as codexFallbackModels } from "@paperclipai/adapter-codex-local";
 import { models as cursorFallbackModels } from "@paperclipai/adapter-cursor-local";
+import { models as openRouterFallbackModels } from "@paperclipai/adapter-openrouter";
 import { resetOpenCodeModelsCacheForTests } from "@paperclipai/adapter-opencode-local/server";
+import { resetOpenRouterModelsCacheForTests } from "@paperclipai/adapter-openrouter/server";
 import { listAdapterModels } from "../adapters/index.js";
 import { resetCodexModelsCacheForTests } from "../adapters/codex-models.js";
 import { resetCursorModelsCacheForTests, setCursorModelsRunnerForTests } from "../adapters/cursor-models.js";
@@ -14,6 +16,7 @@ describe("adapter model listing", () => {
     resetCursorModelsCacheForTests();
     setCursorModelsRunnerForTests(null);
     resetOpenCodeModelsCacheForTests();
+    resetOpenRouterModelsCacheForTests();
     vi.restoreAllMocks();
   });
 
@@ -100,5 +103,33 @@ describe("adapter model listing", () => {
 
     const models = await listAdapterModels("opencode_local");
     expect(models).toEqual([]);
+  });
+
+  it("loads openrouter models dynamically and keeps fallback suggestions", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          data: [
+            { id: "openai/gpt-5-mini", name: "GPT-5 Mini" },
+            { id: "meta-llama/llama-4-scout", name: "Llama 4 Scout" },
+          ],
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+
+    const models = await listAdapterModels("openrouter");
+    expect(models.some((model) => model.id === "openai/gpt-5-mini")).toBe(true);
+    expect(models.some((model) => model.id === "meta-llama/llama-4-scout")).toBe(true);
+    expect(models.some((model) => model.id === openRouterFallbackModels[0]?.id)).toBe(true);
+  });
+
+  it("falls back to curated openrouter models when discovery fails", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ error: { message: "unauthorized" } }), { status: 401 }),
+    );
+
+    const models = await listAdapterModels("openrouter");
+    expect(models).toEqual(openRouterFallbackModels);
   });
 });

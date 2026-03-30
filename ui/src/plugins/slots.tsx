@@ -227,10 +227,12 @@ function getShimBlobUrl(specifier: "react" | "react-dom" | "react-dom/client" | 
         const R = globalThis.__paperclipPluginBridge__?.react;
         export default R;
         const { useState, useEffect, useCallback, useMemo, useRef, useContext,
+          useLayoutEffect, useReducer,
           createContext, createElement, Fragment, Component, forwardRef,
           memo, lazy, Suspense, StrictMode, cloneElement, Children,
           isValidElement, createRef } = R;
         export { useState, useEffect, useCallback, useMemo, useRef, useContext,
+          useLayoutEffect, useReducer,
           createContext, createElement, Fragment, Component, forwardRef,
           memo, lazy, Suspense, StrictMode, cloneElement, Children,
           isValidElement, createRef };
@@ -250,15 +252,15 @@ function getShimBlobUrl(specifier: "react" | "react-dom" | "react-dom/client" | 
       source = `
         const RD = globalThis.__paperclipPluginBridge__?.reactDom;
         export default RD;
-        const { createRoot, hydrateRoot, createPortal, flushSync } = RD ?? {};
-        export { createRoot, hydrateRoot, createPortal, flushSync };
+        const { createRoot, hydrateRoot, createPortal, flushSync, unstable_batchedUpdates } = RD ?? {};
+        export { createRoot, hydrateRoot, createPortal, flushSync, unstable_batchedUpdates };
       `;
       break;
     case "sdk-ui":
       source = `
         const SDK = globalThis.__paperclipPluginBridge__?.sdkUi ?? {};
-        const { usePluginData, usePluginAction, useHostContext, usePluginStream, usePluginToast } = SDK;
-        export { usePluginData, usePluginAction, useHostContext, usePluginStream, usePluginToast };
+        const { usePluginData, usePluginAction, useHostContext, usePluginStream, usePluginToast, useNavigateToEntity } = SDK;
+        export { usePluginData, usePluginAction, useHostContext, usePluginStream, usePluginToast, useNavigateToEntity };
       `;
       break;
   }

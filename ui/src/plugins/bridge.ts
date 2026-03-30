@@ -26,6 +26,7 @@
  */
 
 import { createContext, useCallback, useContext, useRef, useState, useEffect } from "react";
+import { useNavigate } from "@/lib/router";
 import type {
   PluginBridgeErrorCode,
   PluginLauncherBounds,
@@ -362,6 +363,52 @@ export function usePluginAction(key: string): PluginActionFn {
 export function useHostContext(): PluginHostContext {
   const { hostContext } = usePluginBridgeContext();
   return hostContext;
+}
+
+// ---------------------------------------------------------------------------
+// useNavigateToEntity — concrete implementation
+// ---------------------------------------------------------------------------
+
+export interface NavigateToEntityParams {
+  type: "issue" | "agent" | "project" | "company";
+  id: string;
+  companyId: string;
+}
+
+export type NavigateToEntityFn = (params: NavigateToEntityParams) => void;
+
+/**
+ * Concrete implementation of `useNavigateToEntity()`.
+ *
+ * Translates entity type + ID into the correct host route and navigates.
+ */
+export function useNavigateToEntity(): NavigateToEntityFn {
+  const navigate = useNavigate();
+  const { hostContext } = usePluginBridgeContext();
+
+  return useCallback(
+    (params: NavigateToEntityParams) => {
+      const { type, id } = params;
+      const prefix = hostContext.companyPrefix;
+      if (!prefix) return;
+
+      switch (type) {
+        case "issue":
+          navigate(`/${prefix}/issues/${id}`);
+          break;
+        case "agent":
+          navigate(`/${prefix}/agents/${id}`);
+          break;
+        case "project":
+          navigate(`/${prefix}/projects/${id}`);
+          break;
+        case "company":
+          navigate(`/${prefix}/dashboard`);
+          break;
+      }
+    },
+    [navigate, hostContext.companyPrefix],
+  );
 }
 
 // ---------------------------------------------------------------------------

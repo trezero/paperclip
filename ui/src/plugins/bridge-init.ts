@@ -18,6 +18,7 @@ import {
   useHostContext,
   usePluginStream,
   usePluginToast,
+  useNavigateToEntity,
 } from "./bridge.js";
 
 // ---------------------------------------------------------------------------
@@ -64,6 +65,7 @@ export function initPluginBridge(
       useHostContext,
       usePluginStream,
       usePluginToast,
+      useNavigateToEntity,
     },
   };
 }

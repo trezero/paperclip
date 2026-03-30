@@ -4,6 +4,7 @@ import type {
   PluginHostContext,
   PluginStreamResult,
   PluginToastFn,
+  NavigateToEntityFn,
 } from "./types.js";
 import { getSdkUiRuntimeValue } from "./runtime.js";
 
@@ -170,5 +171,34 @@ export function usePluginStream<T = unknown>(
  */
 export function usePluginToast(): PluginToastFn {
   const impl = getSdkUiRuntimeValue<() => PluginToastFn>("usePluginToast");
+  return impl();
+}
+
+// ---------------------------------------------------------------------------
+// useNavigateToEntity
+// ---------------------------------------------------------------------------
+
+/**
+ * Get a function that navigates the host app to a Paperclip entity.
+ *
+ * Lets plugin UI navigate to issues, agents, projects, or companies
+ * without knowing host routing internals.
+ *
+ * @returns A function that navigates to the specified entity
+ *
+ * @example
+ * ```tsx
+ * function IssueLink({ issueRef, companyId }: { issueRef: string; companyId: string }) {
+ *   const navigateToEntity = useNavigateToEntity();
+ *   return (
+ *     <button onClick={() => navigateToEntity({ type: "issue", id: issueRef, companyId })}>
+ *       {issueRef}
+ *     </button>
+ *   );
+ * }
+ * ```
+ */
+export function useNavigateToEntity(): NavigateToEntityFn {
+  const impl = getSdkUiRuntimeValue<() => NavigateToEntityFn>("useNavigateToEntity");
   return impl();
 }

@@ -32,6 +32,7 @@ const SUPPORTED_ADVANCED_ADAPTER_TYPES = new Set<CreateConfigValues["adapterType
   "claude_local",
   "codex_local",
   "gemini_local",
+  "openrouter",
   "opencode_local",
   "pi_local",
   "cursor",
@@ -51,6 +52,8 @@ function createValuesForAdapterType(
     nextValues.model = DEFAULT_GEMINI_LOCAL_MODEL;
   } else if (adapterType === "cursor") {
     nextValues.model = DEFAULT_CURSOR_LOCAL_MODEL;
+  } else if (adapterType === "openrouter") {
+    nextValues.model = "";
   } else if (adapterType === "opencode_local") {
     nextValues.model = "";
   }
@@ -149,6 +152,13 @@ export function NewAgent() {
   function handleSubmit() {
     if (!selectedCompanyId || !name.trim()) return;
     setFormError(null);
+    if (configValues.adapterType === "openrouter") {
+      const selectedModel = configValues.model.trim();
+      if (!selectedModel) {
+        setFormError("OpenRouter requires an explicit model.");
+        return;
+      }
+    }
     if (configValues.adapterType === "opencode_local") {
       const selectedModel = configValues.model.trim();
       if (!selectedModel) {

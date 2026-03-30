@@ -1,0 +1,169 @@
+<h2>Marketing Hub — Layout Structure</h2>
+<p class="subtitle">Three-zone layout: sidebar navigation, main canvas, contextual right panel</p>
+
+<div class="mockup" style="margin-top: 24px;">
+  <div class="mockup-header">Marketing Hub — Unified Workspace</div>
+  <div class="mockup-body" style="display: flex; min-height: 480px; background: #0a0a0a; font-size: 13px;">
+
+    <!-- LEFT SIDEBAR -->
+    <div style="width: 200px; background: #111; border-right: 1px solid #222; display: flex; flex-direction: column; padding: 12px 0;">
+      <div style="padding: 8px 16px; margin-bottom: 8px;">
+        <div style="font-size: 14px; font-weight: 600; color: #e0e0e0;">🎯 Marketing Hub</div>
+        <div style="font-size: 11px; color: #666; margin-top: 2px;">Dallas — MemeFlow</div>
+      </div>
+
+      <div style="padding: 4px 8px;">
+        <div style="padding: 8px 12px; background: #1a1a2e; border-radius: 6px; color: #7c8aff; font-weight: 500; margin-bottom: 2px;">📋 Pipeline</div>
+        <div style="padding: 8px 12px; color: #888; margin-bottom: 2px; border-radius: 6px;">✨ Create</div>
+        <div style="padding: 8px 12px; color: #888; margin-bottom: 2px; border-radius: 6px;">📡 Discover</div>
+        <div style="padding: 8px 12px; color: #888; margin-bottom: 2px; border-radius: 6px;">📊 Monitor</div>
+      </div>
+
+      <!-- Brand Context Panel -->
+      <div style="margin-top: auto; border-top: 1px solid #222; padding: 12px 16px;">
+        <div style="font-size: 10px; text-transform: uppercase; color: #555; letter-spacing: 0.5px; margin-bottom: 6px;">Brand Voice</div>
+        <div style="font-size: 11px; color: #aaa; margin-bottom: 4px;">Tone: <span style="color: #7c8aff;">Witty & Sharp</span></div>
+        <div style="font-size: 11px; color: #aaa; margin-bottom: 4px;">Audience: <span style="color: #7c8aff;">Crypto/DeFi</span></div>
+        <div style="font-size: 11px; color: #aaa;">Platforms: <span style="color: #7c8aff;">X, TG, Reddit</span></div>
+        <div style="font-size: 10px; color: #444; margin-top: 6px; cursor: pointer;">✏️ Edit brand settings</div>
+      </div>
+    </div>
+
+    <!-- MAIN CANVAS — Pipeline Kanban -->
+    <div style="flex: 1; padding: 16px; overflow: auto;">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+        <div>
+          <div style="font-size: 16px; font-weight: 600; color: #e0e0e0;">Content Pipeline</div>
+          <div style="font-size: 12px; color: #666;">Campaign: March Week 4</div>
+        </div>
+        <div style="display: flex; gap: 8px;">
+          <div style="padding: 6px 12px; background: #1a1a2e; border: 1px solid #333; border-radius: 6px; font-size: 12px; color: #7c8aff; cursor: pointer;">+ New Post</div>
+          <div style="padding: 6px 12px; background: #111; border: 1px solid #333; border-radius: 6px; font-size: 12px; color: #888; cursor: pointer;">⚡ Auto-Generate</div>
+        </div>
+      </div>
+
+      <!-- Kanban Columns -->
+      <div style="display: flex; gap: 12px; height: calc(100% - 60px);">
+        <!-- Draft -->
+        <div style="flex: 1; background: #111; border-radius: 8px; padding: 10px; border: 1px solid #222;">
+          <div style="font-size: 12px; font-weight: 500; color: #888; margin-bottom: 10px; display: flex; justify-content: space-between;">
+            <span>Draft</span><span style="background: #1a1a2e; padding: 1px 6px; border-radius: 10px; color: #7c8aff;">3</span>
+          </div>
+          <div style="background: #1a1a1a; border: 1px solid #252525; border-radius: 6px; padding: 10px; margin-bottom: 8px;">
+            <div style="font-size: 11px; color: #e0e0e0; font-weight: 500;">ETH staking meme</div>
+            <div style="font-size: 10px; color: #666; margin-top: 4px;">🐦 Twitter · Image</div>
+            <div style="font-size: 10px; color: #555; margin-top: 6px;">🤖 Agent-generated</div>
+          </div>
+          <div style="background: #1a1a1a; border: 1px solid #252525; border-radius: 6px; padding: 10px; margin-bottom: 8px;">
+            <div style="font-size: 11px; color: #e0e0e0; font-weight: 500;">DeFi yield comparison</div>
+            <div style="font-size: 10px; color: #666; margin-top: 4px;">📱 Reddit · Text</div>
+            <div style="font-size: 10px; color: #555; margin-top: 6px;">✋ Human-created</div>
+          </div>
+          <div style="background: #1a1a1a; border: 1px solid #252525; border-radius: 6px; padding: 10px;">
+            <div style="font-size: 11px; color: #e0e0e0; font-weight: 500;">Airdrop alpha thread</div>
+            <div style="font-size: 10px; color: #666; margin-top: 4px;">✈️ Telegram · Text</div>
+            <div style="font-size: 10px; color: #555; margin-top: 6px;">🤖 Agent-generated</div>
+          </div>
+        </div>
+
+        <!-- Review -->
+        <div style="flex: 1; background: #111; border-radius: 8px; padding: 10px; border: 1px solid #222;">
+          <div style="font-size: 12px; font-weight: 500; color: #888; margin-bottom: 10px; display: flex; justify-content: space-between;">
+            <span>Review</span><span style="background: #2a2a1e; padding: 1px 6px; border-radius: 10px; color: #c9a227;">1</span>
+          </div>
+          <div style="background: #1a1a1a; border: 1px solid #c9a22733; border-radius: 6px; padding: 10px;">
+            <div style="font-size: 11px; color: #e0e0e0; font-weight: 500;">BTC halving countdown</div>
+            <div style="font-size: 10px; color: #666; margin-top: 4px;">🐦 Twitter · Image+Text</div>
+            <div style="display: flex; gap: 4px; margin-top: 8px;">
+              <div style="font-size: 10px; padding: 2px 6px; background: #1a2e1a; color: #4caf50; border-radius: 4px;">Score: 92</div>
+              <div style="font-size: 10px; padding: 2px 6px; background: #2a2a1e; color: #c9a227; border-radius: 4px;">Awaiting</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Approved -->
+        <div style="flex: 1; background: #111; border-radius: 8px; padding: 10px; border: 1px solid #222;">
+          <div style="font-size: 12px; font-weight: 500; color: #888; margin-bottom: 10px; display: flex; justify-content: space-between;">
+            <span>Approved</span><span style="background: #1a2e1a; padding: 1px 6px; border-radius: 10px; color: #4caf50;">2</span>
+          </div>
+          <div style="background: #1a1a1a; border: 1px solid #4caf5033; border-radius: 6px; padding: 10px; margin-bottom: 8px;">
+            <div style="font-size: 11px; color: #e0e0e0; font-weight: 500;">Layer 2 explainer</div>
+            <div style="font-size: 10px; color: #666; margin-top: 4px;">📱 Reddit · Image</div>
+            <div style="font-size: 10px; color: #4caf50; margin-top: 6px;">✓ Ready to publish</div>
+          </div>
+          <div style="background: #1a1a1a; border: 1px solid #4caf5033; border-radius: 6px; padding: 10px;">
+            <div style="font-size: 11px; color: #e0e0e0; font-weight: 500;">Weekly alpha recap</div>
+            <div style="font-size: 10px; color: #666; margin-top: 4px;">✈️ Telegram · Text</div>
+            <div style="font-size: 10px; color: #4caf50; margin-top: 6px;">✓ Scheduled 3/29 9am</div>
+          </div>
+        </div>
+
+        <!-- Published -->
+        <div style="flex: 1; background: #111; border-radius: 8px; padding: 10px; border: 1px solid #222;">
+          <div style="font-size: 12px; font-weight: 500; color: #888; margin-bottom: 10px; display: flex; justify-content: space-between;">
+            <span>Published</span><span style="background: #1a1a2e; padding: 1px 6px; border-radius: 10px; color: #7c8aff;">4</span>
+          </div>
+          <div style="background: #1a1a1a; border: 1px solid #252525; border-radius: 6px; padding: 10px; margin-bottom: 8px; opacity: 0.7;">
+            <div style="font-size: 11px; color: #e0e0e0; font-weight: 500;">Gas fee meme</div>
+            <div style="font-size: 10px; color: #666; margin-top: 4px;">🐦 Twitter · Image</div>
+            <div style="font-size: 10px; color: #7c8aff; margin-top: 6px;">📈 142 likes · 23 RTs</div>
+          </div>
+          <div style="background: #1a1a1a; border: 1px solid #252525; border-radius: 6px; padding: 10px; opacity: 0.7;">
+            <div style="font-size: 11px; color: #e0e0e0; font-weight: 500;">Market outlook thread</div>
+            <div style="font-size: 10px; color: #666; margin-top: 4px;">📱 Reddit · Text</div>
+            <div style="font-size: 10px; color: #7c8aff; margin-top: 6px;">📈 89 upvotes · 31 comments</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- RIGHT PANEL — Contextual Detail -->
+    <div style="width: 280px; background: #111; border-left: 1px solid #222; padding: 16px; display: flex; flex-direction: column;">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+        <div style="font-size: 13px; font-weight: 600; color: #e0e0e0;">Card Detail</div>
+        <div style="font-size: 18px; color: #444; cursor: pointer;">×</div>
+      </div>
+
+      <div style="font-size: 14px; font-weight: 500; color: #e0e0e0; margin-bottom: 4px;">BTC halving countdown</div>
+      <div style="font-size: 11px; color: #666; margin-bottom: 12px;">Created by agent · 2h ago</div>
+
+      <!-- Media Preview -->
+      <div style="background: #0a0a0a; border: 1px solid #222; border-radius: 6px; height: 140px; display: flex; align-items: center; justify-content: center; margin-bottom: 12px;">
+        <div style="text-align: center;">
+          <div style="font-size: 28px; margin-bottom: 4px;">🖼️</div>
+          <div style="font-size: 10px; color: #555;">1024×1024 · Generated via ComfyUI</div>
+        </div>
+      </div>
+
+      <!-- Caption -->
+      <div style="font-size: 10px; text-transform: uppercase; color: #555; letter-spacing: 0.5px; margin-bottom: 4px;">Caption</div>
+      <div style="font-size: 12px; color: #ccc; background: #0a0a0a; border: 1px solid #222; border-radius: 6px; padding: 10px; margin-bottom: 12px; line-height: 1.5;">
+        The halving is coming and your portfolio isn't ready 💀<br><br>Last time: 4x in 18 months<br>This time: ???<br><br>#BTC #Halving #Crypto
+      </div>
+
+      <!-- Moderation -->
+      <div style="font-size: 10px; text-transform: uppercase; color: #555; letter-spacing: 0.5px; margin-bottom: 4px;">Moderation</div>
+      <div style="display: flex; gap: 6px; margin-bottom: 12px;">
+        <div style="font-size: 10px; padding: 3px 8px; background: #1a2e1a; color: #4caf50; border-radius: 4px;">Safety: 92/100</div>
+        <div style="font-size: 10px; padding: 3px 8px; background: #1a2e1a; color: #4caf50; border-radius: 4px;">Brand: ✓ On-voice</div>
+      </div>
+
+      <!-- Paperclip Issue Link -->
+      <div style="font-size: 10px; text-transform: uppercase; color: #555; letter-spacing: 0.5px; margin-bottom: 4px;">Paperclip Issue</div>
+      <div style="font-size: 11px; color: #7c8aff; margin-bottom: 16px; cursor: pointer; text-decoration: underline;">MF-147: [Twitter] BTC halving countdown →</div>
+
+      <!-- Actions -->
+      <div style="margin-top: auto; display: flex; flex-direction: column; gap: 6px;">
+        <div style="padding: 8px; background: #1a2e1a; border: 1px solid #4caf5044; border-radius: 6px; text-align: center; font-size: 12px; color: #4caf50; cursor: pointer; font-weight: 500;">✓ Approve</div>
+        <div style="display: flex; gap: 6px;">
+          <div style="flex: 1; padding: 8px; background: #111; border: 1px solid #333; border-radius: 6px; text-align: center; font-size: 12px; color: #888; cursor: pointer;">✏️ Edit</div>
+          <div style="flex: 1; padding: 8px; background: #111; border: 1px solid #333; border-radius: 6px; text-align: center; font-size: 12px; color: #e74c3c; cursor: pointer;">✗ Reject</div>
+        </div>
+        <div style="padding: 8px; background: #111; border: 1px solid #333; border-radius: 6px; text-align: center; font-size: 12px; color: #888; cursor: pointer;">🔄 Regenerate</div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<p style="margin-top: 16px; font-size: 13px; color: #888;">This shows the Pipeline view (primary workspace). The left sidebar persists across all views. Clicking a Kanban card opens the right panel with full detail, inline media preview, and approval actions.</p>

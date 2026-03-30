@@ -1,0 +1,3 @@
+{"type":"server-started","port":55560,"host":"0.0.0.0","url_host":"localhost","url":"http://localhost:55560","screen_dir":"/home/winadmin/projects/paperclip/.superpowers/brainstorm/2062505-1774760389/content","state_dir":"/home/winadmin/projects/paperclip/.superpowers/brainstorm/2062505-1774760389/state"}
+{"type":"screen-added","file":"/home/winadmin/projects/paperclip/.superpowers/brainstorm/2062505-1774760389/content/hub-layout.html"}
+{"type":"server-stopped","reason":"idle timeout"}

@@ -13,6 +13,7 @@ import {
   sessionCodec as opencodeSessionCodec,
   isOpenCodeUnknownSessionError,
 } from "@paperclipai/adapter-opencode-local/server";
+import { sessionCodec as openRouterSessionCodec } from "@paperclipai/adapter-openrouter/server";
 
 describe("adapter session codecs", () => {
   it("normalizes claude session params with cwd", () => {
@@ -103,6 +104,33 @@ describe("adapter session codecs", () => {
       cwd: "/tmp/gemini",
     });
     expect(geminiSessionCodec.getDisplayId?.(serialized ?? null)).toBe("gemini-session-1");
+  });
+
+  it("normalizes openrouter session params with stored messages", () => {
+    const parsed = openRouterSessionCodec.deserialize({
+      sessionId: "openrouter-session-1",
+      messages: [
+        { role: "user", content: "hello" },
+        { role: "assistant", content: "hi" },
+      ],
+    });
+    expect(parsed).toEqual({
+      sessionId: "openrouter-session-1",
+      messages: [
+        { role: "user", content: "hello" },
+        { role: "assistant", content: "hi" },
+      ],
+    });
+
+    const serialized = openRouterSessionCodec.serialize(parsed);
+    expect(serialized).toEqual({
+      sessionId: "openrouter-session-1",
+      messages: [
+        { role: "user", content: "hello" },
+        { role: "assistant", content: "hi" },
+      ],
+    });
+    expect(openRouterSessionCodec.getDisplayId?.(serialized ?? null)).toBe("openrouter-session-1");
   });
 });
 

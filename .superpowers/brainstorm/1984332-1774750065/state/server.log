@@ -1,0 +1,2 @@
+{"type":"server-started","port":62544,"host":"0.0.0.0","url_host":"172.16.1.230","url":"http://172.16.1.230:62544","screen_dir":"/home/winadmin/projects/paperclip/.superpowers/brainstorm/1984332-1774750065/content","state_dir":"/home/winadmin/projects/paperclip/.superpowers/brainstorm/1984332-1774750065/state"}
+{"type":"server-stopped","reason":"idle timeout"}
