@@ -16,6 +16,7 @@ const adapterLabels: Record<string, string> = {
   claude_local: "Claude (local)",
   codex_local: "Codex (local)",
   gemini_local: "Gemini CLI (local)",
+  openrouter: "OpenRouter",
   opencode_local: "OpenCode (local)",
   pi_local: "Pi (local)",
   openclaw_gateway: "OpenClaw Gateway",
@@ -24,7 +25,7 @@ const adapterLabels: Record<string, string> = {
   http: "HTTP",
 };
 
-const ENABLED_INVITE_ADAPTERS = new Set(["claude_local", "codex_local", "gemini_local", "opencode_local", "pi_local", "cursor"]);
+const ENABLED_INVITE_ADAPTERS = new Set(["claude_local", "codex_local", "gemini_local", "openrouter", "opencode_local", "pi_local", "cursor"]);
 
 function dateTime(value: string) {
   return new Date(value).toLocaleString();

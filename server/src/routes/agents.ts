@@ -398,6 +398,12 @@ export function agentRoutes(db: Db) {
       next.model = DEFAULT_GEMINI_LOCAL_MODEL;
       return ensureGatewayDeviceKey(adapterType, next);
     }
+    if (adapterType === "openrouter") {
+      if (parseNumberLike(next.timeoutSec) == null) {
+        next.timeoutSec = 120;
+      }
+      return ensureGatewayDeviceKey(adapterType, next);
+    }
     // OpenCode requires explicit model selection — no default
     if (adapterType === "cursor" && !asNonEmptyString(next.model)) {
       next.model = DEFAULT_CURSOR_LOCAL_MODEL;
@@ -410,6 +416,13 @@ export function agentRoutes(db: Db) {
     adapterType: string | null | undefined,
     adapterConfig: Record<string, unknown>,
   ) {
+    if (adapterType === "openrouter") {
+      const { config: runtimeConfig } = await secretsSvc.resolveAdapterConfigForRuntime(companyId, adapterConfig);
+      if (!asNonEmptyString(runtimeConfig.model)) {
+        throw unprocessable("Invalid openrouter adapterConfig: model is required");
+      }
+      return;
+    }
     if (adapterType !== "opencode_local") return;
     const { config: runtimeConfig } = await secretsSvc.resolveAdapterConfigForRuntime(companyId, adapterConfig);
     const runtimeEnv = asRecord(runtimeConfig.env) ?? {};
@@ -1761,7 +1774,10 @@ export function agentRoutes(db: Db) {
       );
       patchData.adapterConfig = syncInstructionsBundleConfigFromFilePath(existing, normalizedEffectiveAdapterConfig);
     }
-    if (touchesAdapterConfiguration && requestedAdapterType === "opencode_local") {
+    if (
+      touchesAdapterConfiguration &&
+      (requestedAdapterType === "opencode_local" || requestedAdapterType === "openrouter")
+    ) {
       const effectiveAdapterConfig = asRecord(patchData.adapterConfig) ?? {};
       await assertAdapterConfigConstraints(
         existing.companyId,
